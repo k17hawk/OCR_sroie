@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ENV_NAME="./conda_env"  # This creates it in current directory
+ENV_NAME="./conda_env"  
 PYTHON_VERSION="3.11"
 REQUIREMENTS_FILE="requirements.txt"
 
