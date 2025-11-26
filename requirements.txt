@@ -1,6 +1,6 @@
 ipykernel
 opencv-python
 matplotlib
-pytesseract
 pandas
 seaborn
+torch
