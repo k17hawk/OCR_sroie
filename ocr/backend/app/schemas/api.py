@@ -99,7 +99,11 @@ class DocumentRead(BaseModel):
 
 class AnnotationPut(BaseModel):
     revision: int
-    doc: Doc
+    # Raw editor JSON on purpose. Typing this as ``Doc`` made FastAPI reject
+    # the save (422) BEFORE ``annotations._clean_payload`` could fix it - a
+    # dragged box with a .5 coordinate or one leftover editor key was enough,
+    # and the toolbar showed nothing. The service cleans, then validates.
+    doc: dict[str, Any]
 
 
 class AnnotationPatch(BaseModel):

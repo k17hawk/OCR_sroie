@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { saveCurrent } from "../editor/save";
 import { useStore, type Tool } from "../store";
 import { preannotate, getJob, getDocument } from "../api";
 import { ModelPicker } from "../editor/ModelPicker";
@@ -30,9 +32,7 @@ export function Toolbar() {
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
   const doc = useStore((s) => s.doc);
-  const revision = useStore((s) => s.revision);
   const dirty = useStore((s) => s.dirty);
-  const markSaved = useStore((s) => s.markSaved);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const nav = usePageNav(doc?.document_id ?? null);
@@ -45,13 +45,28 @@ export function Toolbar() {
   const drawType = useStore((s) => s.drawTypeDefault);
   const types = useProjectTypes();
 
-  async function save() {
-    if (!doc) return;
-    const res = await (await import("../api")).putAnnotation(
-      doc.document_id, revision, doc,
-    );
-    markSaved(res.revision);
-  }
+  const saveStatus = useStore((s) => s.saveStatus);
+  const setSaveStatus = useStore((s) => s.setSaveStatus);
+  const save = () => { void saveCurrent(); };
+
+  // Ctrl+S / ⌘+S saves (also while typing in a text box)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (useStore.getState().dirty) void saveCurrent();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // "Saved" fades after a few seconds
+  useEffect(() => {
+    if (saveStatus.state !== "saved") return;
+    const t = setTimeout(() => setSaveStatus({ state: "idle" }), 2500);
+    return () => clearTimeout(t);
+  }, [saveStatus, setSaveStatus]);
 
   async function autoAnnotate() {
     if (!doc) return;
@@ -193,18 +208,39 @@ export function Toolbar() {
         >
           Redo
         </button>
-        <button
-          onClick={save}
-          disabled={!dirty}
-          className={
-            "rounded px-2 py-1 text-[11px] font-medium " +
-            (dirty
-              ? "bg-emerald-600 text-white hover:bg-emerald-500"
-              : "bg-slate-800 text-slate-500")
-          }
-        >
-          Save
-        </button>
+        <div className="relative">
+          <button
+            onClick={save}
+            disabled={!dirty || saveStatus.state === "saving"}
+            className={
+              "rounded px-2 py-1 text-[11px] font-medium " +
+              (saveStatus.state === "error"
+                ? "bg-rose-600 text-white hover:bg-rose-500"
+                : dirty
+                  ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                  : "bg-slate-800 text-slate-500")
+            }
+            title="Save (Ctrl+S)"
+          >
+            {saveStatus.state === "saving"
+              ? "Saving…"
+              : saveStatus.state === "saved" && !dirty
+                ? "Saved ✓"
+                : "Save"}
+          </button>
+          {saveStatus.state === "error" && (
+            <div className="absolute right-0 top-full z-50 mt-1 w-80 whitespace-pre-wrap rounded border border-rose-700 bg-rose-950 p-2 text-[11px] text-rose-100 shadow-lg">
+              <button
+                onClick={() => setSaveStatus({ state: "idle" })}
+                className="float-right ml-2 text-rose-300 hover:text-white"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+              {saveStatus.message}
+            </div>
+          )}
+        </div>
         <button
           onClick={() => {
             if (!doc) return;

@@ -242,6 +242,13 @@ function applyTypeChange(d: Doc, id: number, next: string) {
     if (!target.list_style) target.list_style = "bullet";
     syncListText(target, d);
   }
+  if (next === "handwriting") {
+    if (target.subtype == null) target.subtype = "note";
+    target.handwritten = true;
+  } else if (prev === "handwriting") {
+    delete target.handwritten;
+    if (next !== "figure") delete target.subtype;
+  }
   if (next === "signature" && target.signer == null) target.signer = "other";
   if (next === "stamp" && target.stamp_text == null) target.stamp_text = "";
   if (next === "logo") delete target.text;
@@ -542,6 +549,23 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
             className="w-full rounded bg-slate-800 px-2 py-1 text-slate-100"
           >
             {["photo", "chart", "diagram", "graph", "map", "other"].map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </Section>
+      )}
+
+      {el.type === "handwriting" && (
+        <Section label="subtype">
+          <select
+            value={(el as any).subtype ?? "note"}
+            onChange={(e) => edit((d) => {
+              const t = d.layout.find((x) => x.id === el.id) as any;
+              if (t) { t.subtype = e.target.value; t.handwritten = true; }
+            })}
+            className="w-full rounded bg-slate-800 px-2 py-1 text-slate-100"
+          >
+            {["note", "annotation", "correction", "number", "date", "name", "other"].map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>

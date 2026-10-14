@@ -157,6 +157,18 @@ export interface StampLayout {
   quad: Quad;
 }
 
+/** Handwritten region (a note written next to a list item, …). */
+export interface HandwritingLayout {
+  id: number;
+  type: "handwriting";
+  bbox: BBox;
+  reading_order: number | null;
+  text: string;
+  subtype?: string;
+  handwritten?: boolean;
+  quad: Quad;
+}
+
 export type LayoutElement = NestedIn & (
   | HeaderLayout
   | HeadingLayout
@@ -169,7 +181,8 @@ export type LayoutElement = NestedIn & (
   | FooterLayout
   | LogoLayout
   | SignatureLayout
-  | StampLayout);
+  | StampLayout
+  | HandwritingLayout);
 
 /** Set on a box that belongs to a list item (see ListItem.children). */
 export interface NestedIn {

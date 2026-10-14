@@ -13,6 +13,7 @@ export const TYPE_COLORS: Record<LayoutType, string> = {
   stamp: "#a16207",
   footer: "#14b8a6",
   signature_caption: "#f472b6",
+  handwriting: "#059669",
 };
 
 export const LAYER_KEYS = [

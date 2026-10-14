@@ -279,9 +279,8 @@ function PageMetaPanel({ doc }: { doc: Doc }) {
         <button
           disabled={doc.doc_type === "other"}
           onClick={async () => {
-            const api = await import("../api");
-            const res = await api.putAnnotation(doc.document_id, revision, doc);
-            useStore.getState().markSaved(res.revision);
+            const { saveCurrent } = await import("../editor/save");
+            if (useStore.getState().dirty && !(await saveCurrent())) return;
             await fetch(`/documents/${doc.document_id}/status`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },

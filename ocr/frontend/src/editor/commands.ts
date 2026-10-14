@@ -32,6 +32,10 @@ export function emptyLayout(type: string, bbox: BBox, id: number): LayoutElement
     case "logo":      return { ...base, type: "logo" } as any;
     case "signature": return { ...base, type: "signature", signer: "other", text: "" } as any;
     case "stamp":     return { ...base, type: "stamp", stamp_text: "" };
+    // handwritten note / correction written on the page: same shape as the
+    // reference pages ("subtype": "note", "handwritten": true)
+    case "handwriting":
+      return { ...base, type: "handwriting", subtype: "note", handwritten: true } as any;
     // any other type from /projects/:id/types (title, subheading,
     // handwriting, …) is a plain text region of that type
     default:          return { ...base, type: type as any } as any;

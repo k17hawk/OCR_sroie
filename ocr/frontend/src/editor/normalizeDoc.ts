@@ -416,6 +416,10 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       el.text = "<figure/>";
       el.subtype = el.subtype ?? "photo";
     }
+    if (el.type === "handwriting") {
+      el.subtype = el.subtype ?? "note";
+      el.handwritten = true;
+    }
     if (el.type === "list") {
       let items = Array.isArray(el.items) ? el.items : [];
       const parsed = !items.length && !!(el.text ?? "").trim();
@@ -604,7 +608,12 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     if (use.length) {
       for (const l of readingSort(use, (x) => x.bbox)) {
         const { __fromTextLine, ...rest } = l;
-        outLines.push({ ...rest, block_id: nid, is_heading: isHeading, text: isHeading ? stripHeadingPrefix(rest.text) : rest.text });
+        const out: any = { ...rest, block_id: nid, is_heading: isHeading, text: isHeading ? stripHeadingPrefix(rest.text) : rest.text };
+        if (el.handwritten && !out.handwritten) {
+          // lines of a handwritten region are handwritten (key before quad)
+          const { quad, ...front } = out;
+          outLines.push({ ...front, handwritten: true, quad });
+        } else outLines.push(out);
       }
       continue;
     }
@@ -614,7 +623,8 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       : isHeading ? stripHeadingPrefix(el.text ?? "") : (el.text ?? "");
     const parts = text.split("\n").map((s: string) => s.trim()).filter(Boolean);
     strips(el.bbox, parts.length).forEach((b, i) =>
-      outLines.push(makeLine(parts[i], b, undefined, nid, isHeading, reuse(el.id, parts[i], b))));
+      outLines.push(makeLine(parts[i], b, undefined, nid, isHeading,
+        { ...reuse(el.id, parts[i], b), handwritten: !!el.handwritten })));
   }
   // line_in_block in order within each block
   const counters = new Map<number, number>();

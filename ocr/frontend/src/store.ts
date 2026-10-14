@@ -30,6 +30,12 @@ export type Tool =
   | "fingerprint"
   | "reading-order";
 
+export type SaveStatus =
+  | { state: "idle" }
+  | { state: "saving" }
+  | { state: "saved"; at: number }
+  | { state: "error"; message: string };
+
 export type RightTab =
   | "properties"
   | "tree"
@@ -56,6 +62,8 @@ interface State {
   undo: () => void;
   redo: () => void;
   markSaved: (revision: number) => void;
+  saveStatus: SaveStatus;
+  setSaveStatus: (s: SaveStatus) => void;
 
   selection: Selection;
   setSelection: (s: Selection) => void;
@@ -119,6 +127,7 @@ export const useStore = create<State>((set, get) => ({
       selection: null,
       serverRevision: revision,
       conflict: "none",
+      saveStatus: { state: "idle" },
     }),
 
   reloadIfClean: (doc, revision, imageUrl) => {
@@ -178,6 +187,8 @@ export const useStore = create<State>((set, get) => ({
 
   markSaved: (revision) =>
     set({ revision, serverRevision: revision, dirty: false }),
+  saveStatus: { state: "idle" },
+  setSaveStatus: (saveStatus) => set({ saveStatus }),
 
   selection: null,
   setSelection: (selection) => set({ selection }),

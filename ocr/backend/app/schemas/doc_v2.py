@@ -419,9 +419,11 @@ class Line(_Schema):
     font_size: float
     font_id: Optional[int] = None
     role: Optional[Literal["label", "value", "option"]] = None
-    handwritten: Optional[bool] = None
+    # key order as in the reference pages: a handwritten table line is
+    # ..., "table_index", "cell_id", "handwritten", "quad"
     table_index: Optional[int] = None
     cell_id: Optional[int] = None
+    handwritten: Optional[bool] = None
     list_level: Optional[int] = None
     item_index: Optional[int] = None
     quad: Quad

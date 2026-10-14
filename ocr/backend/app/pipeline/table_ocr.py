@@ -1,7 +1,9 @@
-"""Table structure recognition helpers.
+"""Table structure recognition.
 
-Runs the ``table`` adapter on a sub-region and produces a fully populated
-``Table`` object with cell text drawn from the document's existing lines.
+Builds a fully populated ``Table`` for a region of the page: grid from the
+image / table model / text lines (see ``table_structure``), cell text from
+the document's existing lines. The old version fell back to a 2x2 grid
+whenever the model gave nothing usable, which is why cells went missing.
 """
 from __future__ import annotations
 
@@ -14,93 +16,29 @@ from app.schemas.doc_v2 import Doc, Table, TableCell
 
 
 # ---------------------------------------------------------------------------
-# Bbox overlap helpers
-# ---------------------------------------------------------------------------
-
-def _area(bbox: list[int]) -> int:
-    return max(0, bbox[2] - bbox[0]) * max(0, bbox[3] - bbox[1])
-
-
-def _overlap(a: list[int], b: list[int]) -> int:
-    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
-    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
-    if x1 <= x0 or y1 <= y0:
-        return 0
-    return (x1 - x0) * (y1 - y0)
-
-
-def _quad_from_bbox(b: list[int]) -> list[list[float]]:
-    return [
-        [float(b[0]), float(b[1])],
-        [float(b[2]), float(b[1])],
-        [float(b[2]), float(b[3])],
-        [float(b[0]), float(b[3])],
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Adapter output normalization
-# ---------------------------------------------------------------------------
-
-def _normalize_cells(raw: dict[str, Any], quad: list[list[float]]) -> tuple[
-    int, int, int, list[dict[str, Any]]
-]:
-    """Return (rows, cols, header_rows, cells) regardless of adapter shape."""
-
-    # Case 1: already a grid — ``cells`` have explicit row/col.
-    cells_raw = raw.get("cells") or []
-    if cells_raw and "row" in cells_raw[0] and "col" in cells_raw[0]:
-        rows = int(raw.get("rows") or max(c["row"] for c in cells_raw) + 1)
-        cols = int(raw.get("cols") or max(c["col"] for c in cells_raw) + 1)
-        header_rows = int(raw.get("header_rows", 1))
-        return rows, cols, header_rows, cells_raw
-
-    # Case 2: TATR-style — rows and columns are separate detections.
-    rows_det = [c for c in cells_raw if c.get("kind") == "table row"]
-    cols_det = [c for c in cells_raw if c.get("kind") == "table column"]
-    if rows_det and cols_det:
-        rows = len(rows_det)
-        cols = len(cols_det)
-        header_rows = 1
-        cells: list[dict[str, Any]] = []
-        for r, rb in enumerate(sorted(rows_det, key=lambda c: c["bbox"][1])):
-            for c, cb in enumerate(sorted(cols_det, key=lambda c: c["bbox"][0])):
-                x0 = max(rb["bbox"][0], cb["bbox"][0])
-                y0 = max(rb["bbox"][1], cb["bbox"][1])
-                x1 = min(rb["bbox"][2], cb["bbox"][2])
-                y1 = min(rb["bbox"][3], cb["bbox"][3])
-                if x1 > x0 and y1 > y0:
-                    cells.append({
-                        "row": r, "col": c,
-                        "rowspan": 1, "colspan": 1,
-                        "bbox": [int(x0), int(y0), int(x1), int(y1)],
-                    })
-        if cells:
-            return rows, cols, header_rows, cells
-
-    # Case 3: fallback — uniform grid.
-    rows, cols, header_rows = 2, 2, 1
-    x0 = int(min(p[0] for p in quad))
-    y0 = int(min(p[1] for p in quad))
-    x1 = int(max(p[0] for p in quad))
-    y1 = int(max(p[1] for p in quad))
-    cells = []
-    for r in range(rows):
-        for c in range(cols):
-            cx0 = x0 + (x1 - x0) * c // cols
-            cx1 = x0 + (x1 - x0) * (c + 1) // cols
-            cy0 = y0 + (y1 - y0) * r // rows
-            cy1 = y0 + (y1 - y0) * (r + 1) // rows
-            cells.append({
-                "row": r, "col": c, "rowspan": 1, "colspan": 1,
-                "bbox": [cx0, cy0, cx1, cy1],
-            })
-    return rows, cols, header_rows, cells
-
-
-# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
+def _shift_raw(raw: dict[str, Any], frame: Any) -> dict[str, Any]:
+    """Adapter boxes are in crop coords already (we pass it the crop)."""
+    out = dict(raw or {})
+    # adapters that only return a grid of cells: turn it into row/col boxes
+    cells = out.get("cells") or []
+    if cells and not out.get("row_boxes") and "row" in cells[0] and "bbox" in cells[0]:
+        rows: dict[int, list[float]] = {}
+        cols: dict[int, list[float]] = {}
+        for c in cells:
+            b = c["bbox"]
+            r = rows.setdefault(int(c["row"]), [b[0], b[1], b[2], b[3]])
+            r[1] = min(r[1], b[1]); r[3] = max(r[3], b[3])
+            k = cols.setdefault(int(c["col"]), [b[0], b[1], b[2], b[3]])
+            k[0] = min(k[0], b[0]); k[2] = max(k[2], b[2])
+        if len(rows) >= 2:
+            out["row_boxes"] = [rows[k] for k in sorted(rows)]
+        if len(cols) >= 2:
+            out["col_boxes"] = [cols[k] for k in sorted(cols)]
+    return out
+
 
 def recognize_table(
     *,
@@ -108,51 +46,105 @@ def recognize_table(
     img: Image,
     quad: list[list[float]],
     adapter: Any,
+    rec: Any = None,
+    lang_hint: str = "ne",
 ) -> Table:
-    """Run table structure recognition and populate cell text from existing lines."""
-    raw = adapter.recognize(img, quad)
-    rows, cols, header_rows, cells_raw = _normalize_cells(raw, quad)
+    """Find every row / column / cell of the table inside ``quad``.
+
+    The grid comes from the image (ruling lines) first, then the table model,
+    then the page's text lines - per axis, so a table with only horizontal
+    rules still gets its columns from the text. Cell text comes from the
+    page's existing lines; cells with ink but no line are read with ``rec``
+    (when it is a real recognizer).
+    """
+    from app.pipeline import table_structure as ts
+
+    frame = ts.make_frame(img, quad)
+
+    raw: dict[str, Any] = {}
+    try:
+        rx0, ry0, rx1, ry1 = frame.region
+        sub = frame.img.crop((rx0, ry0, rx1, ry1))
+        sub_quad = [[0.0, 0.0], [float(rx1 - rx0), 0.0],
+                    [float(rx1 - rx0), float(ry1 - ry0)], [0.0, float(ry1 - ry0)]]
+        got = adapter.recognize(sub, sub_quad) or {}
+        # back to crop coords
+        def mv(b): return [b[0] + rx0, b[1] + ry0, b[2] + rx0, b[3] + ry0]
+        for key in ("cells", "row_boxes", "col_boxes"):
+            if got.get(key):
+                got[key] = [({**c, "bbox": mv(c["bbox"])} if isinstance(c, dict) else mv(c))
+                            for c in got[key]]
+        raw = _shift_raw(got, frame)
+    except RuntimeError:
+        raise
+    except Exception:  # noqa: BLE001 - a broken model must not stop the image path
+        raw = {}
+
+    # page lines -> deskewed crop coords
+    tlines = []
+    for i, ln in enumerate(doc.lines):
+        b = frame.box_to_crop(ln.bbox)
+        tlines.append(ts.TLine(text=ln.text, box=b, handwritten=bool(getattr(ln, "handwritten", False)), idx=i))
+
+    st = ts.detect(frame, tlines, raw)
+
+    # cells with ink but no text: read them, if there is a real recognizer
+    if rec is not None and not str(getattr(rec, "name", "")).startswith("mock"):
+        ink = ts._ink(frame.img)
+        todo = []
+        for c in st.cells:
+            if c.text:
+                continue
+            x0, y0, x1, y1 = [int(round(v)) for v in c.box]
+            inner = ink[y0 + 3:y1 - 2, x0 + 3:x1 - 2]
+            if inner.size and inner.mean() > 0.01:
+                todo.append(c)
+        if todo:
+            crops = [frame.img.crop(tuple(int(round(v)) for v in c.box)) for c in todo]
+            try:
+                res = rec.recognize(crops, lang_hint=lang_hint)
+                for c, (t, _conf) in zip(todo, res):
+                    c.text = (t or "").strip()
+            except Exception:  # noqa: BLE001
+                pass
 
     cells: list[TableCell] = []
-    for i, cr in enumerate(cells_raw):
-        bbox = [int(v) for v in cr["bbox"]]
-        cell_area = max(1, _area(bbox))
-
-        # Lines whose bboxes are mostly contained in this cell.
-        contained = [
-            ln for ln in doc.lines
-            if _overlap(ln.bbox, bbox) >= 0.4 * _area(ln.bbox)
-        ]
-        contained.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
-        text = " ".join(ln.text for ln in contained).strip()
-
-        is_header = bool(cr.get("is_header", cr["row"] < header_rows))
-        handwritten = any(getattr(ln, "handwritten", False) for ln in contained)
-
+    for i, c in enumerate(sorted(st.cells, key=lambda c: (c.row, c.col))):
+        q = frame.quad_to_page(c.box)
         cells.append(TableCell(
-            id=i,
-            row=int(cr["row"]),
-            col=int(cr["col"]),
-            rowspan=int(cr.get("rowspan", 1)),
-            colspan=int(cr.get("colspan", 1)),
-            text=text,
-            is_header=is_header,
-            handwritten=handwritten,
-            empty=(text == ""),
-            bbox=bbox,
-            quad=_quad_from_bbox(bbox),
+            id=i, row=c.row, col=c.col, rowspan=c.rowspan, colspan=c.colspan,
+            text=c.text, is_header=c.is_header, handwritten=c.handwritten,
+            empty=(c.text.strip() == ""), bbox=bbox_from_quad(q), quad=q,
         ))
 
+    tq = frame.quad_to_page((st.xs[0], st.ys[0], st.xs[-1], st.ys[-1]))
     return Table(
-        bbox=bbox_from_quad(quad),
-        quad=quad,
-        num_rows=rows,
-        num_cols=cols,
-        header_rows=header_rows,
-        ruling_style="full",
+        bbox=bbox_from_quad(tq),
+        quad=tq,
+        num_rows=len(st.ys) - 1,
+        num_cols=len(st.xs) - 1,
+        header_rows=st.header_rows,
+        ruling_style=st.ruling_style,
         theme=None,
         col_types=None,
-        html="",
+        html=_html(cells),
         reading_order=[c.id for c in cells],
         cells=cells,
     )
+
+
+def _html(cells: list[TableCell]) -> str:
+    import html as _h
+    rows: dict[int, list[TableCell]] = {}
+    for c in cells:
+        rows.setdefault(c.row, []).append(c)
+    out = ["<table>"]
+    for r in sorted(rows):
+        out.append("<tr>")
+        for c in sorted(rows[r], key=lambda c: c.col):
+            tag = "th" if c.is_header else "td"
+            attrs = (f' colspan="{c.colspan}"' if c.colspan > 1 else "") + (f' rowspan="{c.rowspan}"' if c.rowspan > 1 else "")
+            out.append(f"<{tag}{attrs}>{_h.escape(c.text, quote=False)}</{tag}>")
+        out.append("</tr>")
+    out.append("</table>")
+    return "".join(out)

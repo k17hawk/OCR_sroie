@@ -17,6 +17,7 @@ dependencies = [
     "psycopg[binary]",        # Postgres prod
     "python-multipart",       # file uploads
     "Pillow",                 # image size + PDF page rasterization
+    "numpy",                  # table grid detection (table_structure.py)
     "pypdf",                  # PDF page count
     "python-jose[cryptography]",  # JWT
     "passlib[bcrypt]",

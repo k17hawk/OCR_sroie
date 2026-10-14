@@ -73,7 +73,7 @@ def put_annotation(document_id: str, body: AnnotationPut) -> DocumentRead:
         raise HTTPException(500, "project missing for document")
     row = ann_service.replace(
         row=row, project=project,
-        payload=body.doc.model_dump(mode="json"),
+        payload=body.doc,
         revision=body.revision, user_id=None,
     )
     return _read_doc_response(row)
@@ -192,7 +192,8 @@ def ocr_table(document_id: str, body: TableOcrRequest) -> TableOcrResponse:
 
     try:
         table = recognize_table(
-            doc=row.doc, img=img, quad=body.quad, adapter=adapters["table"]
+            doc=row.doc, img=img, quad=body.quad, adapter=adapters["table"],
+            rec=adapters.get("rec"), lang_hint=body.lang_hint,
         )
     except RuntimeError as e:
         raise HTTPException(501, str(e)) from e

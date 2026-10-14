@@ -214,10 +214,11 @@ class PaddleTable:
     ) -> dict[str, Any]:
         self._load()
 
-        # If the engine isn't available, return a uniform 2x2 grid over the
-        # quad so downstream code still gets a valid Table structure.
+        # Engine missing: report "no structure". table_ocr then builds the
+        # grid from ruling lines / text. (A made-up 2x2 grid here used to
+        # override that and lose every other <td>.)
         if self._engine_kind == "unavailable":
-            return _uniform_grid(table_quad, rows=2, cols=2)
+            return dict(_NO_TABLE)
 
         arr = np.asarray(img.convert("RGB"))
 
@@ -230,7 +231,7 @@ class PaddleTable:
                         if html:
                             return {"html": html, "rows": 0, "cols": 0, "cells": []}
                 # No table found — fall back
-                return _uniform_grid(table_quad, rows=2, cols=2)
+                return dict(_NO_TABLE)
 
             if self._engine_kind == "pipeline":
                 result = self._engine.predict(arr)
@@ -238,7 +239,7 @@ class PaddleTable:
                     html = item.get("html") or item.get("pred_html") or ""
                     if html:
                         return {"html": html, "rows": 0, "cols": 0, "cells": []}
-                return _uniform_grid(table_quad, rows=2, cols=2)
+                return dict(_NO_TABLE)
 
             if self._engine_kind == "tablesystem":
                 result = self._engine(arr)
@@ -249,21 +250,21 @@ class PaddleTable:
                 ) or ""
                 if html:
                     return {"html": html, "rows": 0, "cols": 0, "cells": []}
-                return _uniform_grid(table_quad, rows=2, cols=2)
+                return dict(_NO_TABLE)
 
         except Exception as e:  # noqa: BLE001
             # Don't crash the whole OCR pipeline on a table-detection failure.
-            return {
-                **_uniform_grid(table_quad, rows=2, cols=2),
-                "_error": f"paddle table failed: {e}",
-            }
+            return {**_NO_TABLE, "_error": f"paddle table failed: {e}"}
 
-        return _uniform_grid(table_quad, rows=2, cols=2)
+        return dict(_NO_TABLE)
 
 
 # ---------------------------------------------------------------------------
 # Fallback grid
 # ---------------------------------------------------------------------------
+
+_NO_TABLE: dict[str, Any] = {"rows": 0, "cols": 0, "cells": []}
+
 
 def _uniform_grid(
     quad: list[list[float]], *, rows: int, cols: int

@@ -59,7 +59,7 @@ class TableTransformer:
 
         target_sizes = torch.tensor([img.size[::-1]])
         results = processor.post_process_object_detection(
-            outputs, threshold=0.6, target_sizes=target_sizes
+            outputs, threshold=0.5, target_sizes=target_sizes
         )[0]
 
         rows_det: list[dict[str, Any]] = []
@@ -97,4 +97,8 @@ class TableTransformer:
             "rows": len(rows_det),
             "cols": len(cols_det),
             "cells": cells,
+            # raw detections: table_ocr uses them per axis when the image
+            # has no ruling lines for that axis
+            "row_boxes": [r["bbox"] for r in rows_det],
+            "col_boxes": [c["bbox"] for c in cols_det],
         }
