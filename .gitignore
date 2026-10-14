@@ -229,3 +229,9 @@ nepali_synth/
 *.tgz
 *.ini
 *.db
+# Frontend project files: the *.json / *.html rules above would hide them,
+# and without them a fresh clone of the frontend cannot install or build.
+!ocr/frontend/package.json
+!ocr/frontend/tsconfig.json
+!ocr/frontend/index.html
+ocr/frontend/tsconfig.tsbuildinfo

@@ -261,7 +261,6 @@ function ReadingOrderPanel({ doc }: { doc: Doc }) {
 // ---------------------------------------------------------------------------
 
 function PageMetaPanel({ doc }: { doc: Doc }) {
-  const revision = useStore((s) => s.revision);
 
   return (
     <div className="space-y-3 text-xs">
