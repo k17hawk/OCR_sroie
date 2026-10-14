@@ -104,7 +104,8 @@ def serialize_table_html(cells: list[TableCell]) -> str:
                 attrs += f' colspan="{cell.colspan}"'
             if cell.rowspan > 1:
                 attrs += f' rowspan="{cell.rowspan}"'
-            parts.append(f"<{tag}{attrs}>{cell.text}</{tag}>")
+            # a line break inside a cell is written as <br>
+            parts.append(f"<{tag}{attrs}>{cell.text.replace(chr(10), '<br>')}</{tag}>")
         parts.append("</tr>")
     parts.append("</table>")
     return "".join(parts)

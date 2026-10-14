@@ -359,6 +359,10 @@ class _HtmlGrid(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
+        if tag == "br":
+            if self._cell is not None:
+                self._cell["text"] += "\n"
+            return
         if tag == "tr":
             self.rows.append([])
         elif tag in ("td", "th"):
@@ -366,6 +370,7 @@ class _HtmlGrid(HTMLParser):
                 self.rows.append([])
             self._cell = {
                 "th": tag == "th",
+                "hw": "data-handwritten" in a or "handwritten" in (a.get("class") or ""),
                 "colspan": max(1, int(a.get("colspan") or 1)),
                 "rowspan": max(1, int(a.get("rowspan") or 1)),
                 "text": "",
@@ -403,6 +408,9 @@ def html_layout(html: str) -> Optional[dict[str, Any]]:
             ncols = max(ncols, c)
     if not cells:
         return None
+    for c in cells:
+        # whitespace inside a cell collapses (as in a browser); <br> stays a line break
+        c["text"] = "\n".join(" ".join(part.split()) for part in c["text"].split("\n")).strip()
     nrows = max(r for r, _ in taken) + 1
     return {"rows": nrows, "cols": ncols, "cells": cells}
 
@@ -722,3 +730,158 @@ def _fill_text(cells: list[Cell], lines: list[TLine], ink: Optional[np.ndarray] 
         c.text = " ".join(" ".join(p[2] for p in sorted(r, key=lambda p: p[1])) for r in rows).strip()
         c.handwritten = any(p[3].handwritten for p in ps)
         c.line_ids = sorted({p[3].idx for p in ps})
+
+
+# ---------------------------------------------------------------------------
+# Fit a typed structure (HTML) to the image
+# ---------------------------------------------------------------------------
+
+def _pick(n_edges: int, cands: list[float], score) -> list[Optional[int]]:
+    """Assign edges 1..n_edges to increasing candidate indices (or None =
+    interpolate) maximising the summed score. Small DP, fine for tables."""
+    m = len(cands)
+    from functools import lru_cache
+
+    @lru_cache(maxsize=None)
+    def f(k: int, i: int) -> tuple[float, tuple]:
+        if k > n_edges:
+            return 0.0, ()
+        best = f(k + 1, i)
+        best = (best[0], (None,) + best[1])
+        # leave room: later edges may still need candidates, but None is allowed
+        for j in range(i, m):
+            s = score(k, j)
+            if s <= 0:
+                continue
+            rest = f(k + 1, j + 1)
+            if s + rest[0] > best[0]:
+                best = (s + rest[0], (j,) + rest[1])
+        return best
+
+    return list(f(1, 0)[1])
+
+
+def _fill_bounds(lo: float, hi: float, picked: list[Optional[float]],
+                 weights: Optional[list[float]] = None) -> list[float]:
+    """[lo, e1, …, hi]; missing edges are spread between their known
+    neighbours (in proportion to `weights` per slot when given)."""
+    n = len(picked) + 1
+    w = weights or [1.0] * n
+    pts: list[Optional[float]] = [lo, *picked, hi]
+    i = 0
+    while i < len(pts) - 1:
+        j = i + 1
+        while pts[j] is None:
+            j += 1
+        if j > i + 1:
+            a, b = pts[i], pts[j]
+            tot = sum(w[i:j]) or 1.0
+            acc = 0.0
+            for k in range(i + 1, j):
+                acc += w[k - 1]
+                pts[k] = a + (b - a) * acc / tot
+        i = j
+    return [float(p) for p in pts]  # type: ignore[arg-type]
+
+
+def fit_html(frame: Frame, lines: list[TLine], html: str) -> Optional[Structure]:
+    """Use the rows / columns / spans / text the annotator typed, and place
+    the grid on the ruling lines (or text rows) found in the image."""
+    hl = html_layout(html)
+    if not hl:
+        return None
+    nr, nc = hl["rows"], hl["cols"]
+    cells_h = hl["cells"]
+
+    ink = _ink(frame.img)
+    rx0, ry0, rx1, ry1 = frame.region
+    W, H = rx1 - rx0, ry1 - ry0
+
+    h_rules = [r for r in find_h_rules(ink, frame.region)
+               if ry0 - 6 <= r.pos <= ry1 + 6 and sum(e - s for s, e in r.segs) >= 0.12 * W]
+    h_full = [r for r in h_rules if r.covers(rx0, rx1, 0.5)]
+    top = min([r.pos for r in h_full], default=ry0)
+    bot = max([r.pos for r in h_full], default=ry1)
+    ty0 = top if h_full and top - ry0 < 0.25 * H else ry0
+    ty1 = bot if h_full and ry1 - bot < 0.25 * H else ry1
+
+    lines_in = [l for l in lines
+                if rx0 - 2 <= (l.box[0] + l.box[2]) / 2 <= rx1 + 2
+                and ty0 - 2 <= (l.box[1] + l.box[3]) / 2 <= ty1 + 2]
+    med_h = sorted(l.box[3] - l.box[1] for l in lines_in)[len(lines_in) // 2] if lines_in else 20.0
+
+    # ---- rows: interior horizontal rules, else gaps between text rows ----
+    row_c = _dedupe([r.pos for r in h_rules], ty0, ty1, max(6.0, 0.5 * med_h))
+    row_rule = {i: _nearest(h_rules, y) for i, y in enumerate(row_c)}
+    if len(row_c) < nr - 1:
+        bands_t = _rows_from_lines(lines_in)
+        extra = [(a[1] + b[0]) / 2 for a, b in zip(bands_t, bands_t[1:])]
+        extra = [y for y in extra if all(abs(y - c) > 0.5 * med_h for c in row_c)]
+        row_c = sorted(row_c + extra)
+        row_rule = {i: _nearest(h_rules, y) for i, y in enumerate(row_c)}
+
+    def row_score(k: int, j: int) -> float:
+        rule = row_rule.get(j)
+        # cells of the typed table that END at row edge k need a rule there
+        need = [c for c in cells_h if c["row"] + c["rowspan"] == k]
+        span = [c for c in cells_h if c["row"] < k < c["row"] + c["rowspan"]]
+        if rule is None:
+            return 0.3 if not span else 0.05      # a text gap: weak evidence
+        cov = sum(e - s for s, e in rule.segs) / max(1.0, W)
+        return (1.0 if need else 0.2) * min(1.0, cov + 0.1) - (0.6 if span and cov > 0.8 else 0.0)
+
+    picked_r = _pick(nr - 1, row_c, row_score)
+    ys = _fill_bounds(ty0, ty1, [row_c[j] if j is not None else None for j in picked_r])
+    bands = list(zip(ys, ys[1:]))
+
+    # ---- columns: vertical rules, judged row by row against the spans ----
+    v_rules = [r for r in find_v_rules(ink, frame.region, bands) if rx0 - 6 <= r.pos <= rx1 + 6]
+    v_major = [r for r in v_rules if sum(1 for a, b in bands if r.covers(a, b, 0.7)) >= 1]
+    left = min([r.pos for r in v_major], default=rx0)
+    right = max([r.pos for r in v_major], default=rx1)
+    tx0 = left if v_major and left - rx0 < 0.2 * W else rx0
+    tx1 = right if v_major and rx1 - right < 0.2 * W else rx1
+    col_c = _dedupe([r.pos for r in v_rules], tx0, tx1, max(8.0, 0.8 * med_h))
+    col_rule = [_nearest(v_rules, x) for x in col_c]
+
+    def col_score(k: int, j: int) -> float:
+        rule = col_rule[j]
+        if rule is None:
+            return 0.0
+        s = 0.0
+        for r, (a, b) in enumerate(bands):
+            row_cells = [c for c in cells_h if c["row"] <= r < c["row"] + c["rowspan"]]
+            edge = any(c["col"] == k for c in row_cells) or any(c["col"] + c["colspan"] == k for c in row_cells)
+            inside = any(c["col"] < k < c["col"] + c["colspan"] for c in row_cells)
+            has = rule.covers(a, b, 0.6)
+            if edge and has:
+                s += 1.0
+            elif inside and has:
+                s -= 1.0
+        return s
+
+    picked_c = _pick(nc - 1, col_c, col_score)
+    xs = _fill_bounds(tx0, tx1, [col_c[j] if j is not None else None for j in picked_c])
+
+    # ---- cells: typed text, typed spans, typed headers ----
+    cells: list[Cell] = []
+    for hc in cells_h:
+        r, c = hc["row"], hc["col"]
+        rs = min(hc["rowspan"], nr - r); cs = min(hc["colspan"], nc - c)
+        cells.append(Cell(row=r, col=c, rowspan=rs, colspan=cs,
+                          box=(xs[c], ys[r], xs[c + cs], ys[r + rs]),
+                          is_header=hc["th"], text=hc["text"], handwritten=hc.get("hw", False)))
+    hr = 0
+    for r in range(nr):
+        rc = [x for x in cells if x.row == r]
+        if rc and all(x.is_header for x in rc):
+            hr = r + 1
+        else:
+            break
+
+    has_h, has_v = bool(h_rules), bool(v_rules)
+    style = ("full" if has_h and has_v and all(j is not None for j in picked_c) else
+             "partial" if has_h and has_v else
+             "horizontal" if has_h else "partial" if has_v else "none")
+    return Structure(xs=xs, ys=ys, cells=cells, header_rows=hr, ruling_style=style,
+                     source="html fitted to image")

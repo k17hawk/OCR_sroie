@@ -30,6 +30,7 @@ const MAX_SCALE = 8;
 export function Stage() {
   const doc = useStore((s) => s.doc);
   const layers = useStore((s) => s.layers);
+  const overlay = useStore((s) => s.overlay);
   const scale = useStore((s) => s.scale);
   const offset = useStore((s) => s.offset);
   const setViewport = useStore((s) => s.setViewport);
@@ -249,13 +250,18 @@ export function Stage() {
               {!layers.image && (
                 <Rect x={0} y={0} width={doc.width} height={doc.height} fill="#ffffff" />
               )}
-              {layers.layout && <LayoutLayer doc={doc} />}
-              {layers.blocks && <BlockLayer doc={doc} />}
-              {layers.lines && <LineLayer doc={doc} />}
-              {layers.tables && <TableLayer doc={doc} />}
-              {layers.formFields && <FormFieldLayer doc={doc} />}
-              {layers.checkboxes && <ExtraRegionLayer doc={doc} kind="checkbox" />}
-              {layers.extraRegions && <ExtraRegionLayer doc={doc} kind="fingerprint" />}
+              {/* every annotation drawn at the opacity chosen in Layers, so
+                  the scan stays readable; the selected box (HitLayer) is not
+                  dimmed */}
+              <Group opacity={overlay.opacity} listening={false}>
+                {layers.layout && <LayoutLayer doc={doc} />}
+                {layers.blocks && <BlockLayer doc={doc} />}
+                {layers.lines && <LineLayer doc={doc} />}
+                {layers.tables && <TableLayer doc={doc} />}
+                {layers.formFields && <FormFieldLayer doc={doc} />}
+                {layers.checkboxes && <ExtraRegionLayer doc={doc} kind="checkbox" />}
+                {layers.extraRegions && <ExtraRegionLayer doc={doc} kind="fingerprint" />}
+              </Group>
               {(layers.readingOrder || tool === "reading-order") && (
                 <ReadingOrderLayer doc={doc} />
               )}

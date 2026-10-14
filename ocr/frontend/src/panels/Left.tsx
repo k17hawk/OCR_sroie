@@ -10,6 +10,8 @@ interface Props {
 export function LeftPanel({ projectId = 1 }: Props) {
   const layers = useStore((s) => s.layers);
   const toggleLayer = useStore((s) => s.toggleLayer);
+  const overlay = useStore((s) => s.overlay);
+  const setOverlay = useStore((s) => s.setOverlay);
   const selection = useStore((s) => s.selection);
 
   return (
@@ -61,6 +63,30 @@ export function LeftPanel({ projectId = 1 }: Props) {
             </li>
           ))}
         </ul>
+
+        <div className="mt-3 space-y-2 rounded bg-slate-800/50 px-2 py-2 text-xs">
+          <label className="block text-slate-300">
+            <div className="mb-1 flex justify-between">
+              <span>Box opacity</span>
+              <span className="text-slate-500">{Math.round(overlay.opacity * 100)}%</span>
+            </div>
+            <input
+              type="range" min={10} max={100} step={5}
+              value={Math.round(overlay.opacity * 100)}
+              onChange={(e) => setOverlay({ opacity: Number(e.target.value) / 100 })}
+              className="w-full accent-sky-500"
+            />
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-slate-300">
+            <input
+              type="checkbox"
+              checked={overlay.showText}
+              onChange={(e) => setOverlay({ showText: e.target.checked })}
+              className="h-3.5 w-3.5 accent-sky-500"
+            />
+            Show text on boxes
+          </label>
+        </div>
 
         <div className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           Selection

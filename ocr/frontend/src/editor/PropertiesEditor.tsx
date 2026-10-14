@@ -613,8 +613,10 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
             quad={el.quad}
           />
           <div className="mt-1 text-[10px] text-slate-500">
-            Runs structure recognition on the current quad and fills cell
-            text from the OCR lines inside it. Replaces the current cells.
+            Run table OCR: finds the cells and fills their text from the OCR
+            lines (replaces the current cells). Fit cells to image: keeps the
+            Table HTML you typed and moves its cells onto the lines in the
+            scan — done automatically when your HTML adds or removes cells.
           </div>
         </Section>
       )}

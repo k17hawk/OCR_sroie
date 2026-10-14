@@ -119,6 +119,8 @@ export async function ocrTable(
     family: string;
     device: string;
     lang_hint: string;
+    /** typed table HTML: keep its structure + text, only fit it to the image */
+    html?: string;
   },
 ): Promise<TableOcrResponse> {
   const r = await fetch(`/documents/${documentId}/ocr-table`, {

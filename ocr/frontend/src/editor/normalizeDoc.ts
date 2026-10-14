@@ -235,7 +235,7 @@ function tableHtml(t: any): string {
       const attrs =
         (c.colspan > 1 ? ` colspan="${c.colspan}"` : "") +
         (c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : "");
-      out.push(`<${tag}${attrs}>${escHtml(cleanText(c.text ?? ""))}</${tag}>`);
+      out.push(`<${tag}${attrs}>${escHtml(cleanText(c.text ?? "")).replace(/\n/g, "<br>")}</${tag}>`);
     }
     out.push("</tr>");
   }

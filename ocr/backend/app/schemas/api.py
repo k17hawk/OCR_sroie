@@ -202,6 +202,9 @@ class TableOcrRequest(BaseModel):
     family: str = "mock"
     device: str = "cpu"
     lang_hint: str = "ne"
+    # Table HTML typed by the annotator: its rows / columns / spans / text
+    # are kept and only placed on the image (ruling lines, text rows).
+    html: str | None = None
 
 
 class TableOcrResponse(BaseModel):

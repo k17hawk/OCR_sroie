@@ -193,7 +193,7 @@ def ocr_table(document_id: str, body: TableOcrRequest) -> TableOcrResponse:
     try:
         table = recognize_table(
             doc=row.doc, img=img, quad=body.quad, adapter=adapters["table"],
-            rec=adapters.get("rec"), lang_hint=body.lang_hint,
+            rec=adapters.get("rec"), lang_hint=body.lang_hint, html=body.html,
         )
     except RuntimeError as e:
         raise HTTPException(501, str(e)) from e

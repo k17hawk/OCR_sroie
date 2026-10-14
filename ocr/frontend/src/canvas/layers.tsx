@@ -81,6 +81,8 @@ function BoxText({
   bbox, text, k, maxFont, italic,
 }: { bbox: BBox; text: string; k: number; maxFont: number; italic?: boolean }) {
   const [x0, y0, x1, y1] = bbox;
+  const showText = useStore((s) => s.overlay.showText);
+  if (!showText) return null; // off by default: it covered the scan
   if (!text || (y1 - y0) * k < 9) return null; // too small to read at this zoom
   return (
     <>

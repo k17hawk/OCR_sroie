@@ -30,6 +30,28 @@ export type Tool =
   | "fingerprint"
   | "reading-order";
 
+/** How strongly annotations are painted over the scan (Layers panel). */
+export interface OverlayPrefs {
+  /** 0.1 … 1 — opacity of every box, line, cell and chip */
+  opacity: number;
+  /** draw each box's text on top of the scan (hides the scan underneath) */
+  showText: boolean;
+}
+
+const OVERLAY_KEY = "devalabel.overlay";
+function loadOverlay(): OverlayPrefs {
+  const def: OverlayPrefs = { opacity: 0.6, showText: false };
+  try {
+    const v = JSON.parse(localStorage.getItem(OVERLAY_KEY) ?? "null");
+    if (v && typeof v.opacity === "number") {
+      return { opacity: Math.min(1, Math.max(0.1, v.opacity)), showText: !!v.showText };
+    }
+  } catch {
+    /* storage blocked: defaults */
+  }
+  return def;
+}
+
 export type SaveStatus =
   | { state: "idle" }
   | { state: "saving" }
@@ -75,6 +97,8 @@ interface State {
 
   layers: Record<LayerKey, boolean>;
   toggleLayer: (k: LayerKey) => void;
+  overlay: OverlayPrefs;
+  setOverlay: (p: Partial<OverlayPrefs>) => void;
 
   scale: number;
   offset: { x: number; y: number };
@@ -201,6 +225,13 @@ export const useStore = create<State>((set, get) => ({
   layers: { ...LAYER_DEFAULTS },
   toggleLayer: (k) =>
     set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),
+  overlay: loadOverlay(),
+  setOverlay: (p) =>
+    set((s) => {
+      const overlay = { ...s.overlay, ...p };
+      try { localStorage.setItem(OVERLAY_KEY, JSON.stringify(overlay)); } catch { /* ignore */ }
+      return { overlay };
+    }),
 
   scale: 1,
   offset: { x: 0, y: 0 },

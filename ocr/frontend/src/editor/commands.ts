@@ -280,7 +280,7 @@ export function tableText(d: Doc, el: any): string {
         (c.colspan > 1 ? ` colspan="${c.colspan}"` : "") +
         (c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : "") +
         (c.handwritten ? " data-handwritten" : "");
-      tr += `<${tag}${span}>${escapeHtml(c.text ?? "")}</${tag}>`;
+      tr += `<${tag}${span}>${escapeHtml(c.text ?? "").replace(/\n/g, "<br>")}</${tag}>`;
     }
     rows.push(tr + "</tr>");
   }
@@ -314,7 +314,10 @@ function setTableFromHtml(t: any, tableBox: BBox, html: string): boolean {
       for (let i = r; i < r + rowspan; i++) {
         for (let k = col; k < col + colspan; k++) taken.add(`${i},${k}`);
       }
-      const text = (cellEl.textContent ?? "").replace(/\s+/g, " ").trim();
+      // <br> is a line break inside the cell; other whitespace collapses
+      cellEl.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+      const text = (cellEl.textContent ?? "")
+        .split("\n").map((p) => p.replace(/\s+/g, " ").trim()).join("\n").trim();
       const hw = cellEl.hasAttribute("data-handwritten") || cellEl.classList.contains("handwritten");
       parsed.push({ row: r, col, rowspan, colspan, text, header: tag === "th", hw });
       col += colspan;
@@ -411,15 +414,40 @@ function rulingLinesFor(t: Table, ti: number): any[] {
     return Math.round(avg([...left, ...right], x0));
   };
 
+  // A rule is drawn only where a cell actually has an edge, so it does not
+  // cut through a merged (colspan / rowspan) cell. Without spans every edge
+  // is one full-length rule, as in the reference pages.
+  const runs = (on: boolean[]): [number, number][] => {
+    const out: [number, number][] = [];
+    on.forEach((v, i) => {
+      if (!v) return;
+      const last = out[out.length - 1];
+      if (last && last[1] === i) last[1] = i + 1;
+      else out.push([i, i + 1]);
+    });
+    return out;
+  };
   const out: any[] = [];
   for (let r = 0; r <= nr; r++) {
     const y = rowEdge(r);
-    out.push({ table_index: ti, orientation: "h", width: 1, p0: [x0, y], p1: [x1, y], bbox: [x0, y, x1, y + 1] });
+    const on = Array.from({ length: nc }, (_, k) =>
+      r === 0 || r === nr ||
+      cells.some((c) => (c.row + c.rowspan === r || c.row === r) && c.col <= k && k < c.col + c.colspan));
+    for (const [a, b] of runs(on)) {
+      const xa = colEdge(a), xb = colEdge(b);
+      out.push({ table_index: ti, orientation: "h", width: 1, p0: [xa, y], p1: [xb, y], bbox: [xa, y, xb, y + 1] });
+    }
   }
   if (t.ruling_style !== "horizontal") {
     for (let k = 0; k <= nc; k++) {
       const x = colEdge(k);
-      out.push({ table_index: ti, orientation: "v", width: 1, p0: [x, y0], p1: [x, y1], bbox: [x, y0, x + 1, y1] });
+      const on = Array.from({ length: nr }, (_, r) =>
+        k === 0 || k === nc ||
+        cells.some((c) => (c.col + c.colspan === k || c.col === k) && c.row <= r && r < c.row + c.rowspan));
+      for (const [a, b] of runs(on)) {
+        const ya = rowEdge(a), yb = rowEdge(b);
+        out.push({ table_index: ti, orientation: "v", width: 1, p0: [x, ya], p1: [x, yb], bbox: [x, ya, x + 1, yb] });
+      }
     }
   }
   return out;

@@ -7,7 +7,7 @@ whenever the model gave nothing usable, which is why cells went missing.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from PIL.Image import Image
 
@@ -48,8 +48,12 @@ def recognize_table(
     adapter: Any,
     rec: Any = None,
     lang_hint: str = "ne",
+    html: Optional[str] = None,
 ) -> Table:
     """Find every row / column / cell of the table inside ``quad``.
+
+    With ``html`` (typed by the annotator) its rows, columns, spans and text
+    are kept and only the geometry is taken from the image.
 
     The grid comes from the image (ruling lines) first, then the table model,
     then the page's text lines - per axis, so a table with only horizontal
@@ -62,7 +66,10 @@ def recognize_table(
     frame = ts.make_frame(img, quad)
 
     raw: dict[str, Any] = {}
+    typed = bool(html and html.strip())
     try:
+        if typed:
+            raise LookupError  # structure was typed: no model needed
         rx0, ry0, rx1, ry1 = frame.region
         sub = frame.img.crop((rx0, ry0, rx1, ry1))
         sub_quad = [[0.0, 0.0], [float(rx1 - rx0), 0.0],
@@ -77,6 +84,8 @@ def recognize_table(
         raw = _shift_raw(got, frame)
     except RuntimeError:
         raise
+    except LookupError:
+        raw = {}
     except Exception:  # noqa: BLE001 - a broken model must not stop the image path
         raw = {}
 
@@ -86,10 +95,13 @@ def recognize_table(
         b = frame.box_to_crop(ln.bbox)
         tlines.append(ts.TLine(text=ln.text, box=b, handwritten=bool(getattr(ln, "handwritten", False)), idx=i))
 
-    st = ts.detect(frame, tlines, raw)
+    # the annotator typed the structure: keep it, only place it on the image
+    st = ts.fit_html(frame, tlines, html) if typed else None
+    if st is None:
+        st = ts.detect(frame, tlines, raw)
 
     # cells with ink but no text: read them, if there is a real recognizer
-    if rec is not None and not str(getattr(rec, "name", "")).startswith("mock"):
+    if not typed and rec is not None and not str(getattr(rec, "name", "")).startswith("mock"):
         ink = ts._ink(frame.img)
         todo = []
         for c in st.cells:
@@ -144,7 +156,7 @@ def _html(cells: list[TableCell]) -> str:
         for c in sorted(rows[r], key=lambda c: c.col):
             tag = "th" if c.is_header else "td"
             attrs = (f' colspan="{c.colspan}"' if c.colspan > 1 else "") + (f' rowspan="{c.rowspan}"' if c.rowspan > 1 else "")
-            out.append(f"<{tag}{attrs}>{_h.escape(c.text, quote=False)}</{tag}>")
+            out.append(f"<{tag}{attrs}>{_h.escape(c.text, quote=False).replace(chr(10), '<br>')}</{tag}>")
         out.append("</tr>")
     out.append("</table>")
     return "".join(out)

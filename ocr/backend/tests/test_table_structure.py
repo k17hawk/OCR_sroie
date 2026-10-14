@@ -232,3 +232,126 @@ def test_model_html_header_rows_used_when_grid_matches():
     html = "<table>" + "<tr><th></th><th></th><th></th></tr>" * 2 + "<tr><td></td><td></td><td></td></tr>" * 4 + "</table>"
     t = run(img, doc, quad, _HtmlOnlyAdapter(html))
     assert t.header_rows == 2
+
+
+# ---------------------------------------------------------------------------
+# Typed HTML fitted to the image (annotator pastes the table's HTML)
+# ---------------------------------------------------------------------------
+
+FORM_HTML = """<table>
+  <tr><td colspan="4">(ख) नविकरण गरिएको छ ☐ छैन ☐</td></tr>
+  <tr><td colspan="4">(ग) मूल्य अभिवृद्धि कर वा स्थायी लेखा नम्वर दर्ताको प्रमाणपत्र छ ☐ छैन ☐</td></tr>
+  <tr><td colspan="4">(घ) कर चुक्ताको प्रमाणपत्र छ छ ☐ छैन ☐</td></tr>
+  <tr><td colspan="4">(ङ) कुन खरिदको लागि मौजुदा सूचीमा दर्ता हुन निवेदन दिने हो, सो कामको लागि इजाजत पत्र आवश्यक पर्ने भएमा सो को प्रतिलिपि छ ☐ छैन ☐</td></tr>
+  <tr><td colspan="4">३. सार्वजनिक निकायबाट हुने खरिदको लागि दर्ता हुन चाहेको खरिदको प्रकृतिको विवरण :-</td></tr>
+  <tr>
+    <td>(क) मालसामान आपूर्ति:<br>(मालसामानको प्रकृति समेत उल्लेख गर्ने)</td>
+    <td></td>
+    <td>(ख) निर्माण कार्य:</td>
+    <td></td>
+  </tr>
+  <tr>
+    <td>(ग) परामर्श सेवा:<br>(परामर्श सेवाको प्रकृति समेत उल्लेख गर्ने)</td>
+    <td></td>
+    <td>(घ) अन्य सेवा:<br>(अन्य सेवाको प्रकृति उल्लेख गर्ने)</td>
+    <td></td>
+  </tr>
+  <tr>
+    <td>निवेदन दिएको मिति:<br> आ. व.</td>
+    <td colspan="2">फर्मको छाप:</td>
+    <td>निवेदकको नाम:<br> हस्ताक्षर:</td>
+  </tr>
+</table>"""
+
+
+def make_form_page(skew=0.0, rules="full"):
+    """Rows of different heights, two-line cells, uneven columns."""
+    xs = [80, 330, 520, 770, 960]
+    hs = [34, 34, 34, 60, 34, 64, 64, 70]
+    ys = [150]
+    for h in hs:
+        ys.append(ys[-1] + h)
+    W, H = 1040, 800
+    centre = ((xs[0] + xs[-1]) / 2, (ys[0] + ys[-1]) / 2)
+    R = lambda p: _rot(p, centre, skew)  # noqa: E731
+    img = Image.new("RGB", (W, H), "white")
+    dr = ImageDraw.Draw(img)
+    hl = html_layout(FORM_HTML)
+    lines = []
+    f = _font(15)
+    for c in hl["cells"]:
+        x0, y0 = xs[c["col"]], ys[c["row"]]
+        x1 = xs[c["col"] + c["colspan"]]
+        for i, part in enumerate([p for p in c["text"].split("\n") if p]):
+            # wrap long single-line text into the cell width
+            words, cur, rows = part.split(), "", []
+            for w in words:
+                t = (cur + " " + w).strip()
+                if dr.textlength(t, font=f) > (x1 - x0 - 12) and cur:
+                    rows.append(cur); cur = w
+                else:
+                    cur = t
+            rows.append(cur)
+            for j, t in enumerate(rows):
+                y = y0 + 6 + (i + j) * 26
+                p = R((x0 + 6, y))
+                bw = dr.textlength(t, font=f)
+                layer = Image.new("L", (int(bw) + 8, 26), 0)
+                ImageDraw.Draw(layer).text((2, 2), t, font=f, fill=255)
+                layer = layer.rotate(-skew, expand=True, resample=Image.BICUBIC)
+                img.paste((20, 20, 20), (int(p[0]), int(p[1])), layer)
+                b = [x0 + 6, y, x0 + 6 + bw, y + 22]
+                q = [R((b[0], b[1])), R((b[2], b[1])), R((b[2], b[3])), R((b[0], b[3]))]
+                bb = [math.floor(min(a[0] for a in q)), math.floor(min(a[1] for a in q)),
+                      math.ceil(max(a[0] for a in q)), math.ceil(max(a[1] for a in q))]
+                lines.append({"text": t, "bbox": bb, "block_id": 0, "line_in_block": len(lines),
+                              "is_heading": False, "font_size": 15.0, "font_id": None,
+                              "quad": [[round(a[0], 1), round(a[1], 1)] for a in q]})
+    seg = lambda a, b: dr.line([R(a), R(b)], fill=(0, 0, 0), width=2)  # noqa: E731
+    if rules in ("full", "horizontal"):
+        for y in ys:
+            seg((xs[0], y), (xs[-1], y))
+    if rules == "full":
+        for c in hl["cells"]:
+            x0, x1 = xs[c["col"]], xs[c["col"] + c["colspan"]]
+            y0, y1 = ys[c["row"]], ys[c["row"] + c["rowspan"]]
+            seg((x0, y0), (x0, y1)); seg((x1, y0), (x1, y1))
+    quad = [list(R((xs[0], ys[0]))), list(R((xs[-1], ys[0]))), list(R((xs[-1], ys[-1]))), list(R((xs[0], ys[-1])))]
+    doc = {
+        "v": 2, "image": "x.jpg", "width": W, "height": H, "document_id": "doc_test",
+        "page_number": 1, "page_count": 1, "language": "ne", "digit_style": "dev",
+        "doc_type": "other", "text": "", "fonts": [], "font_ids": [],
+        "layout": [], "blocks": [], "lines": lines, "tables": [], "ruling_lines": [],
+        "extra_regions": [],
+        "quality": {"is_grayscale": False, "is_binarized": False, "perspective": False,
+                    "is_clean": True, "has_stamp": False, "has_signature": False,
+                    "has_handwriting": False, "has_fold": False, "has_bleedthrough": False,
+                    "raw_lengths": {"paragraph_chars": 0, "list_items": 0, "form_fields": 0, "table_cells": 0}},
+        "annotation": {"source": "real", "tool": "t", "status": "in_progress"},
+    }
+    return img, Doc.model_validate(doc), quad, xs, ys
+
+
+@pytest.mark.parametrize("skew", [0.0, 0.7])
+def test_typed_html_is_kept_and_placed_on_the_rules(skew):
+    img, doc, quad, xs, ys = make_form_page(skew=skew)
+    t = recognize_table(doc=doc, img=img, quad=quad, adapter=mock.MockTable(), html=FORM_HTML)
+    assert (t.num_rows, t.num_cols, len(t.cells)) == (8, 4, 16)
+    # typed text kept, <br> kept as a line break and written back as <br>
+    c = next(c for c in t.cells if c.row == 5 and c.col == 0)
+    assert c.text == "(क) मालसामान आपूर्ति:\n(मालसामानको प्रकृति समेत उल्लेख गर्ने)"
+    assert "आपूर्ति:<br>(मालसामानको" in t.html
+    # every cell sits on the drawn grid (within a few px, before skew)
+    for c in t.cells:
+        exp = (xs[c.col], ys[c.row], xs[c.col + c.colspan], ys[c.row + c.rowspan])
+        got = c.bbox
+        tol = 4 + abs(skew) * 12
+        assert all(abs(a - b) <= tol for a, b in zip(got, exp)), (c.row, c.col, got, exp)
+
+
+def test_typed_html_without_vertical_rules_still_gets_rows():
+    img, doc, quad, xs, ys = make_form_page(rules="horizontal")
+    t = recognize_table(doc=doc, img=img, quad=quad, adapter=mock.MockTable(), html=FORM_HTML)
+    assert (t.num_rows, t.num_cols, len(t.cells)) == (8, 4, 16)
+    for c in t.cells:
+        assert abs(c.bbox[1] - ys[c.row]) <= 4 and abs(c.bbox[3] - ys[c.row + c.rowspan]) <= 4
