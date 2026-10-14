@@ -134,10 +134,20 @@ function listStyleOf(items: { marker: string }[]): string {
   return "bullet";
 }
 
-function listText(items: { marker: string; level: number; text: string }[]): string {
-  return items
-    .map((it) => "  ".repeat(it.level) + (it.marker === "•" ? "-" : it.marker) + (it.marker ? " " : "") + it.text)
-    .join("\n");
+function listText(
+  items: { marker: string; level: number; text: string; children?: number[] }[],
+  childText: (id: number) => string = () => "",
+): string {
+  const out: string[] = [];
+  for (const it of items) {
+    const indent = "  ".repeat(it.level);
+    out.push(indent + (it.marker === "•" ? "-" : it.marker) + (it.marker ? " " : "") + it.text);
+    for (const cid of it.children ?? []) {
+      const t = childText(cid);
+      if (t) for (const part of t.split("\n")) out.push(indent + "  " + part);
+    }
+  }
+  return out.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -416,9 +426,11 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
           warn({ id: el.id, level: "check", message: `list #${el.id}: some items have no marker (१. / क) / •) — check them.` });
         }
       }
-      el.items = items.map((i: any) => ({ marker: i.marker ?? "", level: Number(i.level) || 0, text: cleanText(i.text) }));
+      el.items = items.map((i: any) => ({
+        marker: i.marker ?? "", level: Number(i.level) || 0, text: cleanText(i.text),
+        ...(Array.isArray(i.children) && i.children.length ? { children: i.children.map(Number) } : {}),
+      }));
       el.list_style = !parsed && el.list_style ? el.list_style : listStyleOf(el.items);
-      el.text = listText(el.items);
     }
     if (el.type === "form_field") {
       el.fields = (el.fields ?? []).map((f: any) => {
@@ -447,9 +459,37 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     }
   }
 
+  // 4b. list items own the boxes named in their `children`: those boxes
+  //     get parent_id / parent_item and no reading order of their own, and
+  //     the list text shows each child's text under its item
+  {
+    const byId = new Map<number, any>(layout.map((e) => [e.id, e]));
+    const owned = new Map<number, [number, number]>();
+    for (const el of layout) {
+      if (el.type !== "list") continue;
+      el.items.forEach((it: any, i: number) => {
+        if (!it.children) return;
+        it.children = it.children.filter((c: number) => byId.has(c) && c !== el.id && !owned.has(c));
+        it.children.forEach((c: number) => owned.set(c, [el.id, i]));
+        if (!it.children.length) delete it.children;
+      });
+    }
+    for (const el of layout) {
+      const o = owned.get(el.id);
+      if (o) { el.parent_id = o[0]; el.parent_item = o[1]; el.reading_order = null; }
+      else { delete el.parent_id; delete el.parent_item; }
+    }
+    const childText = (id: number) => {
+      const c = byId.get(id);
+      return !c ? "" : c.type === "figure" ? "<figure/>" : (c.text ?? "");
+    };
+    for (const el of layout) if (el.type === "list") el.text = listText(el.items, childText);
+  }
+
   // 5. nesting that can't be resolved automatically
   for (const el of layout) {
     if (NO_NESTING_CHECK.has(el.type)) continue;
+    if (el.parent_id != null) continue; // belongs to a list item: allowed
     const outer = container(el, (p) => !NO_NESTING_CHECK.has(p.type));
     if (outer) {
       warn({ id: el.id, level: "check", message: `${el.type} #${el.id} sits inside ${outer.type} #${outer.id}. The export format has no nesting — shrink #${outer.id} or delete one of them.` });
@@ -457,7 +497,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
   }
 
   // 6. reading order: keep if already a clean 0..n-1 sequence, else renumber
-  const ordered = layout.filter((e) => !LOCKED.has(e.type));
+  const ordered = layout.filter((e) => !LOCKED.has(e.type) && e.parent_id == null);
   const ros = ordered.map((e) => e.reading_order);
   const clean =
     ros.every((r) => Number.isInteger(r)) &&
@@ -470,8 +510,9 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
 
   // 7. final element order + new ids (0..n-1): reading order first, locked after
   const origIdx = new Map<any, number>(layout.map((e, i) => [e, i]));
+  const group = (e: any) => (LOCKED.has(e.type) ? 2 : e.parent_id != null ? 1 : 0);
   layout.sort((a, b) => {
-    const la = LOCKED.has(a.type) ? 1 : 0, lb = LOCKED.has(b.type) ? 1 : 0;
+    const la = group(a), lb = group(b);
     return la - lb || (a.reading_order ?? 0) - (b.reading_order ?? 0) ||
       origIdx.get(a)! - origIdx.get(b)!;
   });
@@ -616,9 +657,20 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       case "figure": base.subtype = el.subtype; break;
       case "form_field": base.fields = el.fields; break;
       case "table": base.table_index = el.table_index; break;
-      case "list": base.list_style = el.list_style; base.items = el.items; break;
+      case "list":
+        base.list_style = el.list_style;
+        base.items = el.items.map((it: any) => it.children
+          ? { ...it, children: it.children.map((c: number) => idMap.get(c)).filter((c: any) => c != null) }
+          : it);
+        break;
       case "signature": base.signer = el.signer; break;
       case "stamp": base.stamp_text = cleanText(el.stamp_text); break;
+    }
+    if (el.type !== "figure" && el.subtype != null) base.subtype = el.subtype;
+    if (el.handwritten != null && !LOCKED.has(el.type)) base.handwritten = el.handwritten;
+    if (el.parent_id != null && idMap.has(el.parent_id)) {
+      base.parent_id = idMap.get(el.parent_id);
+      base.parent_item = el.parent_item;
     }
     base.quad = el.quad;
     return base;

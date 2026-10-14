@@ -12,6 +12,7 @@ and the next request sees your change.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -211,11 +212,36 @@ def list_for_project(project_id: int) -> list[DocumentRow]:
     return out
 
 
-def find_by_sha256(project_id: int, sha256: str) -> DocumentRow | None:
+def _fill_missing_sha256(row: DocumentRow) -> None:
+    """Documents imported from JSONL were saved without a hash, so an
+    upload of the same image could never match them. Hash the stored image
+    the first time it's needed and remember it."""
+    if row.sha256 or not row.image_key:
+        return
+    from app.storage import get_storage  # local import: avoid a cycle
+
+    storage = get_storage()
+    try:
+        if not storage.exists(row.image_key):
+            return
+        row.sha256 = hashlib.sha256(storage.get(row.image_key)).hexdigest()
+    except Exception:
+        return
+    save(row)
+
+
+def index_by_sha256(project_id: int) -> dict[str, DocumentRow]:
+    """hash -> document for every document in the project."""
+    out: dict[str, DocumentRow] = {}
     for row in list_for_project(project_id):
-        if row.sha256 == sha256:
-            return row
-    return None
+        _fill_missing_sha256(row)
+        if row.sha256:
+            out.setdefault(row.sha256, row)
+    return out
+
+
+def find_by_sha256(project_id: int, sha256: str) -> DocumentRow | None:
+    return index_by_sha256(project_id).get(sha256)
 
 
 # ---------------------------------------------------------------------------

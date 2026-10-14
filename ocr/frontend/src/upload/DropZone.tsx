@@ -41,7 +41,7 @@ export function DropZone({ projectId, onUploaded }: Props) {
         messages.push(`✗ ${f.filename}: ${f.error ?? "failed"}`);
       }
       for (const w of warnings) {
-        messages.push(`↷ ${w.filename}: duplicate — skipped`);
+        messages.push(`↷ ${w.filename}: already uploaded — opened the existing page`);
       }
       setErrors(messages);
 

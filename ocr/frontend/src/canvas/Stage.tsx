@@ -73,16 +73,30 @@ export function Stage() {
   }, []);
 
   useEffect(() => {
-    if (!doc || !doc.width || !doc.height) return;
+    if (!doc) return;
+    // Pages with width/height 0 or missing: fit to the boxes instead.
+    let pw = Number(doc.width) || 0;
+    let ph = Number(doc.height) || 0;
+    if (!pw || !ph) {
+      for (const el of doc.layout ?? []) {
+        pw = Math.max(pw, el.bbox[2]);
+        ph = Math.max(ph, el.bbox[3]);
+      }
+      for (const ln of doc.lines ?? []) {
+        pw = Math.max(pw, ln.bbox[2]);
+        ph = Math.max(ph, ln.bbox[3]);
+      }
+    }
+    if (!pw || !ph) return;
     const pad = 40;
-    const sx = (size.w - pad * 2) / doc.width;
-    const sy = (size.h - pad * 2) / doc.height;
+    const sx = (size.w - pad * 2) / pw;
+    const sy = (size.h - pad * 2) / ph;
     const fit = Math.min(sx, sy);
     if (!Number.isFinite(fit) || fit <= 0) return; // not measured yet
     const s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, fit));
     setViewport(s, {
-      x: (size.w - doc.width * s) / 2,
-      y: (size.h - doc.height * s) / 2,
+      x: (size.w - pw * s) / 2,
+      y: (size.h - ph * s) / 2,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitRequest, doc?.document_id, doc?.width, doc?.height, size.w, size.h]);

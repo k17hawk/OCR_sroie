@@ -10,29 +10,8 @@ Contract
 * ``finalize`` is idempotent: ``finalize(finalize(d)) == finalize(d)``.
 * Every golden file in ``schema/`` and ``tests/fixtures/`` must satisfy
   ``finalize(Doc.model_validate(g)) == g`` at the JSON value level.
-
-Fixes (annotator data was being lost on save)
----------------------------------------------
-1. A list with no ``items`` (drawn with the List tool, text typed in the
-   panel) had its text replaced by ``serialize_list([]) == ""``. Items are
-   now parsed from the text first, so the list keeps what was typed.
-2. Text boxes whose text is not backed by ``lines`` (OCR / import / JSON
-   edits) were blanked by ``"\\n".join(<no lines>)``. Text is now rebuilt
-   from lines only when the box has lines.
-3. Signature and stamp boxes fell into the text branch, and setting
-   ``.text`` on a model without that field raises — any page with a
-   signature or stamp could not be saved. They are now skipped like logos.
-4. Step 4 rebuilt checkboxes from form fields only, deleting standalone
-   checkboxes. They are now kept (form-option checkboxes are still derived).
-5. ``doc.tables[el.table_index]`` crashed (or picked the last table) for a
-   table box without cell data (index -1 / out of range). Now skipped.
-
-All fixes leave already-finalized documents unchanged, so the golden-file
-contract still holds.
 """
 from __future__ import annotations
-
-import re
 
 from app.core.geometry import bbox_from_quad
 from app.core.serialize import (
@@ -50,7 +29,6 @@ from app.schemas.doc_v2 import (
     FormFieldLayout,
     HeadingLayout,
     Line,
-    ListItem,
     ListLayout,
     LogoLayout,
     ParagraphLayout,
@@ -123,42 +101,11 @@ def _derive_digit_style(text: str, current: str) -> str:
     if has_dev and has_lat:
         return "mixed"
     if has_dev:
-        return "devanagari"
+        # keep the page's spelling ("dev" in the reference data)
+        return current if current in ("dev", "devanagari") else "devanagari"
     if has_lat:
         return "latin"
     return current
-
-
-# ---------------------------------------------------------------------------
-# List text -> items (fix 1)
-# ---------------------------------------------------------------------------
-
-_LIST_MARKER_RE = re.compile(
-    r"^(\s*)((?:[०-९]+|[0-9]+)[.)]|\(?[क-ह]\)|\([०-९0-9]+\)|[a-zA-Z][.)]"
-    r"|(?:[ivxlcdm]+|[IVXLCDM]+)[.)]|[-•*●▪◦–])\s+(.*)$"
-)
-
-
-def _items_from_text(text: str) -> list[ListItem]:
-    """"१. a\\n२. b" -> [ListItem('१.', 0, 'a'), ListItem('२.', 0, 'b')].
-
-    Two leading spaces (or a tab) per nesting level; a line without a
-    marker continues the previous item.
-    """
-    items: list[ListItem] = []
-    for raw in text.replace("\r\n", "\n").split("\n"):
-        if not raw.strip():
-            continue
-        m = _LIST_MARKER_RE.match(raw)
-        if m:
-            marker = "•" if m.group(2) in ("-", "*", "●") else m.group(2)
-            level = len(m.group(1).replace("\t", "  ")) // 2
-            items.append(ListItem(marker=marker, level=level, text=m.group(3).strip()))
-        elif items:
-            items[-1].text = f"{items[-1].text} {raw.strip()}"
-        else:
-            items.append(ListItem(marker="", level=0, text=raw.strip()))
-    return items
 
 
 # ---------------------------------------------------------------------------
@@ -178,19 +125,22 @@ def finalize(doc: Doc) -> Doc:
 
     # ------------------------------------------------------------------
     # 1) Recompute bbox + text on every layout element.
+    #
+    # Rule: lines win when they exist; human-entered text survives when
+    # they don't. This lets an annotator type/paste text into an element
+    # that has no backing OCR lines (e.g. a region drawn over a bitmap
+    # label, or a heading whose line was deleted) without finalize
+    # silently blanking it.
     # ------------------------------------------------------------------
     for el in doc.layout:
         # bbox from quad — always.
         el.bbox = bbox_from_quad(el.quad)
 
-        if isinstance(el, (LogoLayout, SignatureLayout, StampLayout)):
-            # No ``text`` field on these (fix 3). Nothing to derive.
-            continue
-
         if isinstance(el, HeadingLayout):
             block_lines = lines_by_block.get(el.id, [])
             if block_lines:
                 el.text = "#" * el.level + " " + block_lines[0].text
+            # else: no lines — keep el.text as typed by the human
 
         elif isinstance(el, FigureLayout):
             el.text = "<figure/>"
@@ -200,29 +150,61 @@ def finalize(doc: Doc) -> Doc:
                 value = field.value
                 if isinstance(value, CheckboxFieldValue):
                     value.text = serialize_checkbox_value(value.options)
-            if el.fields:
-                el.text = serialize_form_field(el.fields)
+            el.text = serialize_form_field(el.fields)
 
         elif isinstance(el, ListLayout):
-            # fix 1: an item-less list keeps its typed text as items
-            if not el.items and el.text.strip():
-                el.items = _items_from_text(el.text)
-            if el.items:
-                el.text = serialize_list(el.items)
+            pass  # after the loop: needs its children's final text
 
         elif isinstance(el, TableLayout):
-            # fix 5: only a table box that points at real cell data
-            if 0 <= el.table_index < len(doc.tables):
-                table = doc.tables[el.table_index]
-                table.html = serialize_table_html(table.cells)
-                el.text = table.html
+            table = doc.tables[el.table_index]
+            table.html = serialize_table_html(table.cells)
+            el.text = table.html
+
+        elif isinstance(el, LogoLayout):
+            # No ``text`` field on logos. Nothing to do.
+            continue
 
         else:
-            # header, paragraph, title, text_line, list_item, form_label, …
-            # fix 2: rebuild from lines only when the box has lines
+            # header, paragraph, signature_caption, footer
             block_lines = lines_by_block.get(el.id, [])
             if block_lines:
-                el.text = "\n".join(ln.text for ln in block_lines)
+                # wrapped lines of one region read as one text, joined by a
+                # space (as in the reference pages), not by a newline
+                el.text = " ".join(ln.text.strip() for ln in block_lines if ln.text.strip())
+            # else: no lines — keep el.text as typed by the human
+
+    # ------------------------------------------------------------------
+    # 1b) Lists: items may own other boxes (a note, a figure, …) through
+    #     ``children``. Keep parent_id / parent_item on those boxes in step
+    #     with ``children`` (children win), then build the list text with
+    #     each child's text indented under its item.
+    # ------------------------------------------------------------------
+    by_id = {el.id: el for el in doc.layout}
+    owned: dict[int, tuple[int, int]] = {}
+    for el in doc.layout:
+        if not isinstance(el, ListLayout):
+            continue
+        for i, item in enumerate(el.items):
+            if item.children is None:
+                continue
+            kept = [c for c in item.children if c in by_id and c != el.id and c not in owned]
+            for c in kept:
+                owned[c] = (el.id, i)
+            item.children = kept or None
+    for el in doc.layout:
+        if el.id in owned:
+            el.parent_id, el.parent_item = owned[el.id]
+            el.reading_order = None  # read as part of the list item
+        elif getattr(el, "parent_id", None) is not None:
+            el.parent_id = el.parent_item = None
+
+    def _child_text(cid: int) -> str | None:
+        child = by_id.get(cid)
+        return getattr(child, "text", None) if child is not None else None
+
+    for el in doc.layout:
+        if isinstance(el, ListLayout):
+            el.text = serialize_list(el.items, _child_text)
 
     # ------------------------------------------------------------------
     # 2) Recompute blocks from layout (same order as layout).
@@ -245,8 +227,7 @@ def finalize(doc: Doc) -> Doc:
         table.html = serialize_table_html(table.cells)
 
     # ------------------------------------------------------------------
-    # 4) Recompute extra_regions: derived checkboxes first, then the
-    #    standalone checkboxes the annotator drew (fix 4), then the rest.
+    # 4) Recompute extra_regions: derived checkboxes first, then the rest.
     # ------------------------------------------------------------------
     derived_checkboxes: list[CheckboxExtraRegion] = []
     for el in doc.layout:
@@ -266,15 +247,8 @@ def finalize(doc: Doc) -> Doc:
                         quad=opt.box_quad,
                     )
                 )
-    derived_boxes = {tuple(cb.bbox) for cb in derived_checkboxes}
-    standalone = [
-        e for e in doc.extra_regions
-        if e.type == "checkbox" and tuple(bbox_from_quad(e.quad)) not in derived_boxes
-    ]
-    for e in standalone:
-        e.bbox = bbox_from_quad(e.quad)
     non_checkbox = [e for e in doc.extra_regions if e.type != "checkbox"]
-    doc.extra_regions = derived_checkboxes + standalone + non_checkbox
+    doc.extra_regions = derived_checkboxes + non_checkbox
 
     # ------------------------------------------------------------------
     # 5) Recompute the page text from the reading order.

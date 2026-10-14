@@ -94,9 +94,14 @@ class FormFieldEntry(_Schema):
 
 
 class ListItem(_Schema):
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"children"})
+
     marker: str
     level: int
     text: str
+    # ids of layout elements that belong to this item (a note, a figure, …);
+    # each of them has parent_id = the list's id and parent_item = this index
+    children: Optional[list[int]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -106,13 +111,23 @@ class ListItem(_Schema):
 # is a runtime expression and would raise NameError otherwise.
 # ---------------------------------------------------------------------------
 
-class _TextLayout(_Schema):
+class _LayoutBase(_Schema):
+    """Common base of every layout element: parent_id / parent_item are left
+    out of the JSON when not set."""
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset(
+        {"parent_id", "parent_item", "subtype", "handwritten"}
+    )
+
+
+class _TextLayout(_LayoutBase):
     """Base for text-only layout types. Not used directly in the union."""
     id: int
     type: str
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
@@ -160,8 +175,17 @@ class TableFooterLayout(_TextLayout):
     type: Literal["table_footer"] = "table_footer"
 
 
-class HandwritingLayout(_TextLayout):
+class HandwritingLayout(_LayoutBase):
+    id: int
     type: Literal["handwriting"] = "handwriting"
+    bbox: BBox
+    reading_order: Optional[int] = None
+    text: str
+    subtype: Optional[str] = None
+    handwritten: Optional[bool] = None
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
+    quad: Quad
 
 
 class HandwrittenAnnotationLayout(_TextLayout):
@@ -184,56 +208,66 @@ class MixedTextLayout(_TextLayout):
 # Structural / block / form / mark layout classes
 # ---------------------------------------------------------------------------
 
-class HeaderLayout(_Schema):
+class HeaderLayout(_LayoutBase):
     id: int
     type: Literal["header"] = "header"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class HeadingLayout(_Schema):
+class HeadingLayout(_LayoutBase):
     id: int
     type: Literal["heading"] = "heading"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
     level: int
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class FigureLayout(_Schema):
+class FigureLayout(_LayoutBase):
     id: int
     type: Literal["figure"] = "figure"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
     subtype: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class FormFieldLayout(_Schema):
+class FormFieldLayout(_LayoutBase):
     id: int
     type: Literal["form_field"] = "form_field"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
     fields: list[FormFieldEntry]
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class TableLayout(_Schema):
+class TableLayout(_LayoutBase):
     id: int
     type: Literal["table"] = "table"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
     table_index: int
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class ListLayout(_Schema):
+class ListLayout(_LayoutBase):
     id: int
     type: Literal["list"] = "list"
     bbox: BBox
@@ -241,59 +275,73 @@ class ListLayout(_Schema):
     text: str
     list_style: str
     items: list[ListItem]
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class ParagraphLayout(_Schema):
+class ParagraphLayout(_LayoutBase):
     id: int
     type: Literal["paragraph"] = "paragraph"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class SignatureCaptionLayout(_Schema):
+class SignatureCaptionLayout(_LayoutBase):
     id: int
     type: Literal["signature_caption"] = "signature_caption"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class FooterLayout(_Schema):
+class FooterLayout(_LayoutBase):
     id: int
     type: Literal["footer"] = "footer"
     bbox: BBox
     reading_order: Optional[int] = None
     text: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class LogoLayout(_Schema):
+class LogoLayout(_LayoutBase):
     id: int
     type: Literal["logo"] = "logo"
     bbox: BBox
     reading_order: Optional[int] = None
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class SignatureLayout(_Schema):
+class SignatureLayout(_LayoutBase):
     id: int
     type: Literal["signature"] = "signature"
     bbox: BBox
     reading_order: Optional[int] = None
     signer: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
-class StampLayout(_Schema):
+class StampLayout(_LayoutBase):
     id: int
     type: Literal["stamp"] = "stamp"
     bbox: BBox
     reading_order: Optional[int] = None
     stamp_text: str
+    parent_id: Optional[int] = None
+    parent_item: Optional[int] = None
     quad: Quad
 
 
@@ -511,7 +559,7 @@ class Doc(_Schema):
     page_number: int
     page_count: int
     language: Literal["ne", "en", "mixed", "hi"]
-    digit_style: Literal["devanagari", "latin", "mixed"]
+    digit_style: Literal["devanagari", "dev", "latin", "mixed"]
     doc_type: str
     text: str
     fonts: list[Any] = []

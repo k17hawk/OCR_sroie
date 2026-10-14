@@ -36,6 +36,22 @@ function quadBox(q: [number, number][]): BBox {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
+/**
+ * Area the click-catcher must cover: the page, grown to include every box.
+ * Pages whose width/height are 0 or missing (or smaller than their boxes)
+ * used to get a click-catcher of no size, so nothing could be selected
+ * even though the boxes were drawn.
+ */
+function clickExtent(doc: Doc, items: HitItem[]): [number, number] {
+  let w = Number(doc.width) || 0;
+  let h = Number(doc.height) || 0;
+  for (const it of items) {
+    if (Number.isFinite(it.bbox[2])) w = Math.max(w, it.bbox[2]);
+    if (Number.isFinite(it.bbox[3])) h = Math.max(h, it.bbox[3]);
+  }
+  return [w, h];
+}
+
 /** Every selectable thing on the page, honouring the layer toggles. */
 function collectItems(doc: Doc, layers: Record<string, boolean>): HitItem[] {
   const items: HitItem[] = [];
@@ -267,6 +283,7 @@ export function HitLayer({ doc }: { doc: Doc }) {
   const roMode = tool === "reading-order";
   const M = 200;
   const items = useMemo(() => collectItems(doc, layers), [doc, layers]);
+  const [extW, extH] = useMemo(() => clickExtent(doc, items), [doc, items]);
 
   if (tool !== "select" && !roMode) return null;
 
@@ -517,8 +534,8 @@ export function HitLayer({ doc }: { doc: Doc }) {
       <Rect
         x={-M}
         y={-M}
-        width={doc.width + 2 * M}
-        height={doc.height + 2 * M}
+        width={extW + 2 * M}
+        height={extH + 2 * M}
         fill="rgba(0,0,0,0.01)"
         listening={true}
         draggable={!roMode}

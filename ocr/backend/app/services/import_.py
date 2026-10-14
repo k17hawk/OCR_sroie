@@ -1,6 +1,7 @@
 """Import a JSONL file. ``overwrite=True`` replaces existing documents."""
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, BinaryIO
 
@@ -9,7 +10,20 @@ from pydantic import ValidationError
 from app.core.finalize import finalize
 from app.schemas.doc_v2 import Doc
 from app.services.projects import Project
-from app.storage import doc_store
+from app.storage import doc_store, get_storage
+
+
+def image_sha256(image_key: str) -> str:
+    """Hash of the stored page image, so uploading the same image later
+    finds this document instead of creating a blank copy. Empty if the
+    image isn't in storage."""
+    storage = get_storage()
+    try:
+        if not image_key or not storage.exists(image_key):
+            return ""
+        return hashlib.sha256(storage.get(image_key)).hexdigest()
+    except Exception:
+        return ""
 
 
 def import_jsonl(
@@ -59,6 +73,7 @@ def import_jsonl(
                 status=finalized.annotation.status,
                 doc=finalized,
                 image_key=finalized.image,
+                sha256=image_sha256(finalized.image),
                 source_filename="<imported>",
             )
             doc_store.save(row)

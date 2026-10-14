@@ -1,6 +1,7 @@
 """Upload orchestration: validate, dedupe, store, create skeleton documents."""
 from __future__ import annotations
 
+import hashlib
 import io
 import uuid
 import zipfile
@@ -102,10 +103,38 @@ def _ingest_pdf(project: Project, filename: str, data: bytes) -> FileResult:
         return FileResult(filename=filename, ok=False,
                           error=f"file exceeds {project.max_upload_mb} MB")
 
+    # Re-uploading a PDF that is already in the project opens the existing
+    # (possibly annotated) pages instead of creating blank copies. Pages are
+    # keyed by the hash of the whole PDF plus the page number.
+    pdf_hash = hashlib.sha256(data).hexdigest()
+    index = doc_store.index_by_sha256(project.id)
+    existing_pages = sorted(
+        (r for h, r in index.items() if h.startswith(f"pdf:{pdf_hash}:")),
+        key=lambda r: r.page_number,
+    )
+    if existing_pages:
+        return FileResult(
+            filename=filename, ok=True, skipped_duplicate=True,
+            document_ids=[r.document_id for r in existing_pages],
+        )
+
     try:
         pages = list(pdf_service.iter_pdf_pages(data, dpi=project.default_dpi))
     except Exception as e:
         return FileResult(filename=filename, ok=False, error=f"pdf: {e}")
+
+    # PDFs uploaded before the whole-PDF key existed stored each page under
+    # the hash of its rendered image. Match those too, and move them to the
+    # new key so the next upload is matched without rendering.
+    legacy = [index.get(hashlib.sha256(jpeg).hexdigest()) for _, jpeg, _, _ in pages]
+    if pages and all(legacy):
+        for (page_number, _, _, _), row in zip(pages, legacy):
+            row.sha256 = f"pdf:{pdf_hash}:p{page_number}"
+            doc_store.save(row)
+        return FileResult(
+            filename=filename, ok=True, skipped_duplicate=True,
+            document_ids=[r.document_id for r in legacy],
+        )
 
     source_file_id = f"src_{uuid.uuid4().hex[:12]}"
     page_count = len(pages)
@@ -140,7 +169,7 @@ def _ingest_pdf(project: Project, filename: str, data: bytes) -> FileResult:
             status=doc.annotation.status,
             doc=doc,
             image_key=image_key,
-            sha256=prepared.sha256,
+            sha256=f"pdf:{pdf_hash}:p{page_number}",
             source_file_id=source_file_id,
             source_filename=filename,
             text_layer=text_layer or None,

@@ -1,6 +1,6 @@
 import type {
   BBox, Doc, ExtraRegion, FormFieldEntry, FormFieldLabel, LayoutElement,
-  Line, NormalFieldValue, Quad, Table, TableCell,
+  Line, NormalFieldValue, Quad, Table,
 } from "../types";
 import type { Selection } from "../store";
 
@@ -50,31 +50,17 @@ export function addLayoutElement(d: Doc, type: string, bbox: BBox): number {
   return id;
 }
 
+/**
+ * A new table is one box with no cells. It used to start as a placeholder
+ * 2×2 grid, which split every newly marked table into four boxes. Cells
+ * come from the text box (one row per line, cells split by |) or from
+ * "Table OCR".
+ */
 export function emptyTable(bbox: BBox): Table {
-  const quad = quadFromBBox(bbox);
-  const [x0, y0, x1, y1] = bbox;
-  const num_rows = 2, num_cols = 2;
-  const cells: TableCell[] = [];
-  for (let r = 0; r < num_rows; r++) {
-    for (let c = 0; c < num_cols; c++) {
-      const cx0 = x0 + ((x1 - x0) * c) / num_cols;
-      const cx1 = x0 + ((x1 - x0) * (c + 1)) / num_cols;
-      const cy0 = y0 + ((y1 - y0) * r) / num_rows;
-      const cy1 = y0 + ((y1 - y0) * (r + 1)) / num_rows;
-      const cb: BBox = [Math.floor(cx0), Math.floor(cy0), Math.ceil(cx1), Math.ceil(cy1)];
-      cells.push({
-        id: r * num_cols + c,
-        row: r, col: c, rowspan: 1, colspan: 1,
-        text: "", is_header: r === 0, handwritten: false, empty: true,
-        bbox: cb,
-        quad: quadFromBBox(cb),
-      });
-    }
-  }
   return {
-    bbox, quad, num_rows, num_cols, header_rows: 1,
+    bbox, quad: quadFromBBox(bbox), num_rows: 0, num_cols: 0, header_rows: 0,
     ruling_style: "full", theme: null, col_types: null,
-    html: "", reading_order: cells.map((c) => c.id), cells,
+    html: "", reading_order: [], cells: [],
   };
 }
 
@@ -187,9 +173,357 @@ export function mirrorCheckboxExtra(d: Doc): void {
  * or trimmed to match the new text. Element types whose text is not derived
  * (figure, form_field, table, list, stamp) only have ``el.text`` updated.
  */
+// ---------------------------------------------------------------------------
+// Text for types whose text is derived (form fields, tables)
+//
+// Form field: one line per field, "label: value".
+// Table:      the table's HTML (<tr>, <td>/<th>, rowspan, colspan);
+//             rows of cells separated by " | " also work.
+// ---------------------------------------------------------------------------
+
+function rowBox(b: BBox, i: number, n: number): BBox {
+  const h = Math.max(1, (b[3] - b[1]) / Math.max(1, n));
+  return [b[0], Math.round(b[1] + i * h), b[2], Math.round(b[1] + (i + 1) * h)];
+}
+
+/** What the generic text box shows for a form field. */
+export function formFieldText(el: any): string {
+  return (el.fields ?? [])
+    .map((f: FormFieldEntry) => {
+      const label = f.label?.text ?? "";
+      const v = f.value as any;
+      if (!v || "options" in v) return label;
+      const sep = label.trimEnd().endsWith(":") ? " " : ": ";
+      return `${label}${sep}${v.text ?? ""}`;
+    })
+    .join("\n");
+}
+
+function setFormFieldText(el: any, text: string): void {
+  if (!Array.isArray(el.fields)) el.fields = [];
+  const before = formFieldText(el).split("\n");
+  const rows = text.split("\n");
+  // a trailing empty line is just the cursor on a new line, not a field
+  while (rows.length > 1 && rows[rows.length - 1].trim() === "") rows.pop();
+  const n = rows.length;
+
+  rows.forEach((row, i) => {
+    // a line that wasn't changed leaves its field exactly as it was
+    if (el.fields[i] && row === before[i]) return;
+
+    // the label is what is typed up to and including the first ":"
+    const colon = row.indexOf(":");
+    const labelText = colon >= 0 ? row.slice(0, colon + 1) : row;
+    const valueText = colon >= 0 ? row.slice(colon + 1).trim() : null;
+
+    let f = el.fields[i] as FormFieldEntry | undefined;
+    if (!f) {
+      const b = rowBox(el.bbox, i, n);
+      const split = Math.round(b[0] + (b[2] - b[0]) * 0.4);
+      const lb: BBox = [b[0], b[1], split, b[3]];
+      f = { label: { text: "", bbox: lb, quad: quadFromBBox(lb) }, field_type: "text", value: null };
+      el.fields.push(f);
+    }
+    f.label.text = labelText.trim();
+
+    const v = f.value as any;
+    if (v && "options" in v) return; // checkbox: options are edited below
+    if (valueText === null) {
+      if (v) v.text = "";
+    } else if (v) {
+      v.text = valueText;
+    } else {
+      const lb = f.label.bbox;
+      const vb: BBox = [lb[2], lb[1], Math.max(lb[2] + 4, el.bbox[2]), lb[3]];
+      f.value = { text: valueText, bbox: vb, quad: quadFromBBox(vb), handwritten: false };
+    }
+  });
+
+  if (el.fields.length > n) el.fields.splice(n);
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * The table's HTML, as the text box shows it: same rules as the server's
+ * serialize_table_html (<th> for headers, colspan/rowspan only when > 1,
+ * cells covered by a span skipped), one <tr> per line for readability.
+ */
+export function tableText(d: Doc, el: any): string {
+  const t = d.tables[el.table_index];
+  if (!t || !t.cells.length) return "";
+  const maxRow = Math.max(...t.cells.map((c) => c.row + c.rowspan));
+  const maxCol = Math.max(...t.cells.map((c) => c.col + c.colspan));
+  const at = new Map(t.cells.map((c) => [`${c.row},${c.col}`, c]));
+  const covered = new Set<string>();
+  for (const c of t.cells) {
+    for (let r = c.row; r < c.row + c.rowspan; r++) {
+      for (let k = c.col; k < c.col + c.colspan; k++) {
+        if (r !== c.row || k !== c.col) covered.add(`${r},${k}`);
+      }
+    }
+  }
+  const rows: string[] = [];
+  for (let r = 0; r < maxRow; r++) {
+    let tr = "<tr>";
+    for (let k = 0; k < maxCol; k++) {
+      if (covered.has(`${r},${k}`)) continue;
+      const c = at.get(`${r},${k}`);
+      if (!c) continue;
+      const tag = c.is_header ? "th" : "td";
+      const span =
+        (c.colspan > 1 ? ` colspan="${c.colspan}"` : "") +
+        (c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : "") +
+        (c.handwritten ? " data-handwritten" : "");
+      tr += `<${tag}${span}>${escapeHtml(c.text ?? "")}</${tag}>`;
+    }
+    rows.push(tr + "</tr>");
+  }
+  return ["<table>", ...rows, "</table>"].join("\n");
+}
+
+/**
+ * Rebuild a table's cells from HTML. Returns false (table untouched) when
+ * the HTML has no <tr> yet, e.g. while it is still being typed.
+ * Cell boxes: kept from an existing cell at the same row/column/span while
+ * the grid keeps its shape,
+ * otherwise an even grid over the table box.
+ */
+function setTableFromHtml(t: any, tableBox: BBox, html: string): boolean {
+  const src = /<table[\s>]/i.test(html) ? html : `<table>${html}</table>`;
+  const dom = new DOMParser().parseFromString(src, "text/html");
+  const trs = Array.from(dom.querySelectorAll("tr"));
+  if (trs.length === 0) return false;
+
+  type Parsed = { row: number; col: number; rowspan: number; colspan: number; text: string; header: boolean; hw: boolean };
+  const parsed: Parsed[] = [];
+  const taken = new Set<string>();
+  trs.forEach((tr, r) => {
+    let col = 0;
+    for (const cellEl of Array.from(tr.children)) {
+      const tag = cellEl.tagName.toLowerCase();
+      if (tag !== "td" && tag !== "th") continue;
+      while (taken.has(`${r},${col}`)) col++;
+      const rowspan = Math.max(1, parseInt(cellEl.getAttribute("rowspan") ?? "1", 10) || 1);
+      const colspan = Math.max(1, parseInt(cellEl.getAttribute("colspan") ?? "1", 10) || 1);
+      for (let i = r; i < r + rowspan; i++) {
+        for (let k = col; k < col + colspan; k++) taken.add(`${i},${k}`);
+      }
+      const text = (cellEl.textContent ?? "").replace(/\s+/g, " ").trim();
+      const hw = cellEl.hasAttribute("data-handwritten") || cellEl.classList.contains("handwritten");
+      parsed.push({ row: r, col, rowspan, colspan, text, header: tag === "th", hw });
+      col += colspan;
+    }
+  });
+  if (parsed.length === 0) return false;
+
+  const nr = Math.max(...parsed.map((p) => p.row + p.rowspan));
+  const nc = Math.max(...parsed.map((p) => p.col + p.colspan));
+  const [x0, y0, x1, y1] = tableBox;
+  const cw = (x1 - x0) / nc, rh = (y1 - y0) / nr;
+  // Reuse an old cell's box only while the grid keeps its shape (e.g. you
+  // fixed a cell's text). If rows/columns changed, old boxes would overlap
+  // the new ones, so every cell gets a fresh even grid.
+  const sameShape = t.num_rows === nr && t.num_cols === nc;
+  const old = new Map<string, any>(
+    sameShape
+      ? (t.cells ?? []).map((c: any) => [`${c.row},${c.col},${c.rowspan},${c.colspan}`, c])
+      : [],
+  );
+
+  t.cells = parsed.map((p, id) => {
+    const prev = old.get(`${p.row},${p.col},${p.rowspan},${p.colspan}`);
+    const b: BBox = prev?.bbox ?? [
+      Math.round(x0 + p.col * cw), Math.round(y0 + p.row * rh),
+      Math.round(x0 + (p.col + p.colspan) * cw), Math.round(y0 + (p.row + p.rowspan) * rh),
+    ];
+    return {
+      id, row: p.row, col: p.col, rowspan: p.rowspan, colspan: p.colspan,
+      text: p.text, is_header: p.header,
+      handwritten: p.hw, empty: p.text === "",
+      bbox: b, quad: prev?.quad ?? quadFromBBox(b),
+    };
+  });
+  t.num_rows = nr;
+  t.num_cols = nc;
+  // leading rows whose cells are all <th>
+  let hr = 0;
+  while (hr < nr && parsed.filter((p) => p.row === hr).every((p) => p.header)) hr++;
+  t.header_rows = hr;
+  t.reading_order = t.cells.map((c: any) => c.id);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Keep a table in the reference shape (see a finished page such as
+// doc_0000096): one OCR line per non-empty cell, linked by
+// block_id = the table's layout id, table_index and cell_id, with the
+// cell's text; and ruling lines for the grid.
+//
+// Line boxes: an existing OCR line inside the cell keeps its tight text box
+// (and quad / font size); otherwise the line takes the cell's box.
+// ---------------------------------------------------------------------------
+
+const center = (b: BBox): [number, number] => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+const inBox = (p: [number, number], b: BBox) =>
+  p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
+/** Replace the lines matched by `mine` with `fresh`, at the position of the
+ *  first of them, so the order of `lines` stays as it was. */
+function replaceLines(d: Doc, mine: (ln: any) => boolean, fresh: any[]): void {
+  const at = d.lines.findIndex(mine);
+  const rest = d.lines.filter((ln) => !mine(ln));
+  const pos = at < 0 ? rest.length : d.lines.slice(0, at).filter((ln) => !mine(ln)).length;
+  d.lines = [...rest.slice(0, pos), ...fresh, ...rest.slice(pos)];
+}
+
+const unionBox = (bs: BBox[]): BBox => [
+  Math.min(...bs.map((b) => b[0])), Math.min(...bs.map((b) => b[1])),
+  Math.max(...bs.map((b) => b[2])), Math.max(...bs.map((b) => b[3])),
+];
+
+/** Ruling lines from the cell grid, honouring the table's ruling_style. */
+function rulingLinesFor(t: Table, ti: number): any[] {
+  if (!t.cells.length || t.ruling_style === "none") return [];
+  const cells = t.cells;
+  const nr = Math.max(...cells.map((c) => c.row + c.rowspan));
+  const nc = Math.max(...cells.map((c) => c.col + c.colspan));
+  const x0 = Math.min(...cells.map((c) => c.bbox[0])), x1 = Math.max(...cells.map((c) => c.bbox[2]));
+  const y0 = Math.min(...cells.map((c) => c.bbox[1])), y1 = Math.max(...cells.map((c) => c.bbox[3]));
+  const avg = (v: number[], dflt: number) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : dflt);
+
+  const rowEdge = (r: number) => {
+    if (r === 0) return y0;
+    if (r === nr) return y1;
+    const above = cells.filter((c) => c.row + c.rowspan === r).map((c) => c.bbox[3]);
+    const below = cells.filter((c) => c.row === r).map((c) => c.bbox[1]);
+    return Math.round(avg([...above, ...below], y0));
+  };
+  const colEdge = (k: number) => {
+    if (k === 0) return x0;
+    if (k === nc) return x1;
+    const left = cells.filter((c) => c.col + c.colspan === k).map((c) => c.bbox[2]);
+    const right = cells.filter((c) => c.col === k).map((c) => c.bbox[0]);
+    return Math.round(avg([...left, ...right], x0));
+  };
+
+  const out: any[] = [];
+  for (let r = 0; r <= nr; r++) {
+    const y = rowEdge(r);
+    out.push({ table_index: ti, orientation: "h", width: 1, p0: [x0, y], p1: [x1, y], bbox: [x0, y, x1, y + 1] });
+  }
+  if (t.ruling_style !== "horizontal") {
+    for (let k = 0; k <= nc; k++) {
+      const x = colEdge(k);
+      out.push({ table_index: ti, orientation: "v", width: 1, p0: [x, y0], p1: [x, y1], bbox: [x, y0, x + 1, y1] });
+    }
+  }
+  return out;
+}
+
+/**
+ * Bring one table's lines (and, if asked, ruling lines) in line with its
+ * cells. Call after the cells change: Table OCR, HTML / text edit, cell edit.
+ * `ruling`: regenerate ruling lines from the cell grid. Pass false for a
+ * text-only change so hand-made or imported ruling lines are kept; they are
+ * still created if the table has none.
+ */
+export function syncTable(d: Doc, elementId: number, opts: { ruling?: boolean } = {}): void {
+  const el = d.layout.find((e) => e.id === elementId) as any;
+  if (!el || el.type !== "table") return;
+  const ti = el.table_index;
+  const t = d.tables[ti];
+  if (!t) return;
+
+  // lines that belong to this table: its own, plus orphans inside it
+  const ids = new Set(d.layout.map((e) => e.id));
+  const mine = (ln: any) =>
+    ln.block_id === elementId ||
+    (!ids.has(ln.block_id) && inBox(center(ln.bbox), el.bbox));
+  const old = d.lines.filter(mine);
+
+  const order = t.reading_order?.length ? t.reading_order : t.cells.map((c) => c.id);
+  const byId = new Map(t.cells.map((c) => [c.id, c]));
+  const fresh: Line[] = [];
+  for (const cid of order) {
+    const c = byId.get(cid);
+    if (!c || !(c.text ?? "").trim()) continue;
+    const inside = old.filter((ln) => inBox(center(ln.bbox), c.bbox));
+    const one = inside.length === 1 ? inside[0] : null;
+    const bbox: BBox = inside.length ? unionBox(inside.map((ln) => ln.bbox)) : c.bbox;
+    const quad = one?.quad ?? (inside.length ? quadFromBBox(bbox) : c.quad);
+    const line: any = {
+      text: c.text,
+      bbox,
+      block_id: elementId,
+      line_in_block: fresh.length,
+      is_heading: false,
+      font_size: inside[0]?.font_size ?? Math.max(8, (bbox[3] - bbox[1]) * 0.7),
+      font_id: inside[0]?.font_id ?? null,
+      table_index: ti,
+      cell_id: c.id,
+      quad,
+    };
+    if (c.handwritten) line.handwritten = true;
+    fresh.push(line);
+  }
+  replaceLines(d, mine, fresh);
+
+  const hasRuling = d.ruling_lines.some((rl) => rl.table_index === ti);
+  if (opts.ruling || !hasRuling) {
+    d.ruling_lines = [
+      ...d.ruling_lines.filter((rl) => rl.table_index !== ti),
+      ...rulingLinesFor(t, ti),
+    ];
+  }
+}
+
+function setTableText(d: Doc, el: any, text: string): void {
+  if (typeof el.table_index !== "number" || el.table_index < 0 || !d.tables[el.table_index]) {
+    el.table_index = d.tables.length;
+    d.tables.push(emptyTable(el.bbox));
+  }
+  const t = d.tables[el.table_index];
+  const shape = () => `${t.num_rows}x${t.num_cols}:${t.cells.length}`;
+  const before = shape();
+  // lines and ruling lines follow the cells; the grid is redrawn only when
+  // rows / columns changed, so a text fix keeps the existing ruling lines
+  const done = () => syncTable(d, el.id, { ruling: shape() !== before });
+
+  // cleared box: no cells
+  if (text.trim() === "") {
+    t.cells = [];
+    t.num_rows = 0; t.num_cols = 0; t.header_rows = 0; t.reading_order = [];
+    done();
+    return;
+  }
+  // HTML: the HTML decides rows, columns, spans and headers
+  if (text.trim().startsWith("<")) {
+    if (setTableFromHtml(t, el.bbox, text)) done();
+    return;
+  }
+
+  // otherwise: one row per line, cells separated by | (or a tab).
+  // Turned into HTML so it follows exactly the same rules.
+  const rows = text.split("\n").filter((r, i, a) => i < a.length - 1 || r.trim() !== "");
+  const html = rows
+    .map((r) => "<tr>" + r.split(/\s*\|\s*|\t/).map((c) => `<td>${escapeHtml(c.trim())}</td>`).join("") + "</tr>")
+    .join("");
+  if (setTableFromHtml(t, el.bbox, `<table>${html}</table>`)) done();
+}
+
 export function setElementText(d: Doc, elementId: number, newText: string): void {
   const el = d.layout.find((e) => e.id === elementId) as any;
   if (!el) return;
+
+  // These types don't keep their own text on save: the server rebuilds it
+  // from fields / cells, or has no text field at all. Text typed into the
+  // generic text box (or filled by "OCR region") has to go into the data the
+  // server keeps, or it is thrown away on the next save.
+  if (el.type === "form_field") { setFormFieldText(el, newText); return; }
+  if (el.type === "table") { setTableText(d, el, newText); return; }
+  if (el.type === "stamp") { el.stamp_text = newText; return; }
+  if (el.type === "figure" || el.type === "signature" || el.type === "logo") return;
 
   el.text = newText;
 
@@ -197,7 +531,10 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
   // text from `items` on every save, so text typed here without updating
   // the items was thrown away.
   if (el.type === "list") {
-    el.items = listItemsFromText(newText);
+    const known = (el.items ?? []).flatMap((it: ListItemData) =>
+      (it.children ?? []).map((id) => ({ id, text: childTextOf(d, id) })));
+    el.items = listItemsFromText(newText, known);
+    afterListChange(d, el.id);
     return;
   }
 
@@ -209,6 +546,12 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
     "handwritten_number", "mixed_text",
   ]);
   if (!LINE_BASED.has(el.type)) return;
+
+  // the text box shows one row per line; the region's own text joins them
+  // with a space, as in the reference pages (the server does the same)
+  if (el.type !== "heading") {
+    el.text = newText.split("\n").map((t) => t.trim()).filter(Boolean).join(" ");
+  }
 
   let displayLines = newText.split("\n");
 
@@ -229,11 +572,16 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
   const n = Math.max(1, displayLines.length);
   const h = Math.max(1, Math.floor((y1 - y0) / n));
 
+  // Same number of lines: only the text changes, so OCR line boxes stay
+  // where they are. A different number of lines has no real geometry, so
+  // the lines are laid out as even strips over the region.
+  const relayout = existing.length !== n;
   for (let i = 0; i < Math.min(existing.length, n); i++) {
     const { ln } = existing[i];
     ln.text = displayLines[i];
     ln.line_in_block = i;
     ln.is_heading = el.type === "heading";
+    if (!relayout) continue;
     ln.bbox = [x0, y0 + i * h, x1, y0 + (i + 1) * h];
     ln.quad = [
       [ln.bbox[0], ln.bbox[1]],
@@ -538,20 +886,41 @@ export function autoReadingOrder(d: Doc): void {
 // list text <-> items
 // ---------------------------------------------------------------------------
 
-export interface ListItemData { marker: string; level: number; text: string }
+export interface ListItemData {
+  marker: string;
+  level: number;
+  text: string;
+  /** ids of boxes that belong to this item (a note, a figure, …) */
+  children?: number[];
+}
 
 const LIST_MARKER_RE =
   /^(\s*)((?:[०-९]+|[0-9]+)[.)]|\(?[क-ह]\)|\([०-९0-9]+\)|[a-zA-Z][.)]|(?:[ivxlcdm]+|[IVXLCDM]+)[.)]|[-•*●▪◦–])\s+(.*)$/;
 
-/** "१. a\n  - b" -> [{marker:"१.",level:0,text:"a"},{marker:"•",level:1,text:"b"}] */
-export function listItemsFromText(text: string): ListItemData[] {
+/**
+ * "१. a\n  - b" -> [{marker:"१.",level:0,text:"a"},{marker:"•",level:1,text:"b"}]
+ *
+ * `children`: boxes that already belong to items of this list, with their
+ * text. A marker-less line equal to one of them is that child (it stays
+ * attached to the item above it) instead of being glued onto the item text.
+ */
+export function listItemsFromText(
+  text: string,
+  children: { id: number; text: string }[] = [],
+): ListItemData[] {
   const items: ListItemData[] = [];
+  const unused = [...children];
   for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
     if (!raw.trim()) continue;
     const m = raw.match(LIST_MARKER_RE);
+    const ci = m ? -1 : unused.findIndex((c) => c.text.trim() === raw.trim());
     if (m) {
       const marker = m[2] === "-" || m[2] === "*" || m[2] === "●" ? "•" : m[2];
       items.push({ marker, level: Math.floor(m[1].replace(/\t/g, "  ").length / 2), text: m[3].trim() });
+    } else if (ci >= 0 && items.length) {
+      const last = items[items.length - 1];
+      (last.children ??= []).push(unused[ci].id);
+      unused.splice(ci, 1);
     } else if (items.length) {
       items[items.length - 1].text += " " + raw.trim(); // wrapped line
     } else {
@@ -561,15 +930,180 @@ export function listItemsFromText(text: string): ListItemData[] {
   return items;
 }
 
-/** Same format the server's serialize_list produces. */
-export function listTextFromItems(items: ListItemData[]): string {
-  return items
-    .map((it) => "  ".repeat(Math.max(0, it.level || 0)) +
-      (it.marker ? (it.marker === "•" ? "-" : it.marker) + " " : "") + (it.text ?? ""))
-    .join("\n");
+/** A child box's text as it appears in its list's text. */
+export function childTextOf(d: Doc | null | undefined, id: number): string {
+  const c = d?.layout.find((e) => e.id === id) as any;
+  if (!c) return "";
+  if (c.type === "figure") return "<figure/>";
+  return c.text ?? "";
+}
+
+/**
+ * Same format the server's serialize_list produces: each item on its own
+ * line, 2 spaces per level, and each child's text under its item one level
+ * deeper.
+ */
+export function listTextFromItems(items: ListItemData[], d?: Doc | null): string {
+  const out: string[] = [];
+  for (const it of items) {
+    const indent = "  ".repeat(Math.max(0, it.level || 0));
+    out.push(indent + (it.marker ? (it.marker === "•" ? "-" : it.marker) + " " : "") + (it.text ?? ""));
+    for (const cid of it.children ?? []) {
+      const t = childTextOf(d, cid);
+      if (t) for (const part of t.split("\n")) out.push(indent + "  " + part);
+    }
+  }
+  return out.join("\n");
 }
 
 /** Call after changing a list's items so its text matches. */
-export function syncListText(el: any): void {
-  if (el && el.type === "list" && Array.isArray(el.items)) el.text = listTextFromItems(el.items);
+export function syncListText(el: any, d?: Doc | null): void {
+  if (el && el.type === "list" && Array.isArray(el.items)) el.text = listTextFromItems(el.items, d);
+}
+
+/**
+ * Keep the boxes inside a list in step with its items' `children`:
+ * each child gets parent_id = the list, parent_item = the item's index and
+ * no reading order of its own (it is read as part of the item). Ids that no
+ * longer exist are dropped; boxes no item points to lose their parent.
+ */
+export function linkListChildren(d: Doc, listId: number): void {
+  const el = d.layout.find((e) => e.id === listId) as any;
+  if (!el || el.type !== "list") return;
+  const ids = new Set(d.layout.map((e) => e.id));
+  const owned = new Map<number, number>();
+  el.items.forEach((it: ListItemData, i: number) => {
+    if (!it.children) return;
+    it.children = it.children.filter((c) => ids.has(c) && c !== listId && !owned.has(c));
+    it.children.forEach((c) => owned.set(c, i));
+    if (!it.children.length) delete it.children;
+  });
+  for (const e of d.layout as any[]) {
+    if (owned.has(e.id)) {
+      e.parent_id = listId;
+      e.parent_item = owned.get(e.id);
+      e.reading_order = null;
+    } else if (e.parent_id === listId) {
+      delete e.parent_id;
+      delete e.parent_item;
+    }
+  }
+}
+
+/** Attach a box to item `itemIndex` of a list (moving it from any other item). */
+export function attachToListItem(d: Doc, listId: number, itemIndex: number, childId: number): void {
+  for (const e of d.layout as any[]) {
+    if (e.type !== "list") continue;
+    for (const it of e.items as ListItemData[]) {
+      if (it.children) it.children = it.children.filter((c) => c !== childId);
+    }
+  }
+  const el = d.layout.find((e) => e.id === listId) as any;
+  if (!el?.items?.[itemIndex]) return;
+  (el.items[itemIndex].children ??= []).push(childId);
+  for (const e of d.layout as any[]) if (e.type === "list") linkListChildren(d, e.id);
+  afterListChange(d, listId);
+}
+
+/** Detach a box from its list item. */
+export function detachFromList(d: Doc, listId: number, childId: number): void {
+  const el = d.layout.find((e) => e.id === listId) as any;
+  if (!el) return;
+  for (const it of el.items as ListItemData[]) {
+    if (it.children) it.children = it.children.filter((c) => c !== childId);
+  }
+  afterListChange(d, listId);
+}
+
+/** Boxes lying (80 %+) inside the list that could belong to one of its items. */
+export function listChildCandidates(d: Doc, listId: number): any[] {
+  const el = d.layout.find((e) => e.id === listId) as any;
+  if (!el) return [];
+  const inside = (b: BBox, o: BBox) => {
+    const ix = Math.max(0, Math.min(b[2], o[2]) - Math.max(b[0], o[0]));
+    const iy = Math.max(0, Math.min(b[3], o[3]) - Math.max(b[1], o[1]));
+    const a = Math.max(1, (b[2] - b[0]) * (b[3] - b[1]));
+    return (ix * iy) / a >= 0.8;
+  };
+  return (d.layout as any[]).filter(
+    (e) => e.id !== listId && e.type !== "list" && inside(e.bbox, el.bbox),
+  );
+}
+
+/**
+ * Attach every box inside the list to the item it sits under: the last
+ * item whose first line starts above the box.
+ */
+export function autoAttachListChildren(d: Doc, listId: number): number {
+  const el = d.layout.find((e) => e.id === listId) as any;
+  if (!el) return 0;
+  const tops = el.items.map((_: any, i: number) => {
+    const ls = d.lines.filter((ln) => ln.block_id === listId && (ln as any).item_index === i);
+    return ls.length ? Math.min(...ls.map((ln) => ln.bbox[1])) : null;
+  });
+  let n = 0;
+  for (const c of listChildCandidates(d, listId)) {
+    let best = -1;
+    tops.forEach((t: number | null, i: number) => { if (t != null && t <= c.bbox[1] + 2) best = i; });
+    if (best < 0) best = 0;
+    if (!el.items[best]) continue;
+    for (const it of el.items as ListItemData[]) {
+      if (it.children) it.children = it.children.filter((x) => x !== c.id);
+    }
+    (el.items[best].children ??= []).push(c.id);
+    n++;
+  }
+  afterListChange(d, listId);
+  return n;
+}
+
+/**
+ * One line per item, as in the reference pages: text "marker text",
+ * list_level = the item's level, item_index = its position. An existing
+ * line of the item keeps its box (and quad / font) when the text did not
+ * change; a changed item gets one line spanning its old lines.
+ */
+export function syncListLines(d: Doc, listId: number): void {
+  const el = d.layout.find((e) => e.id === listId) as any;
+  if (!el || el.type !== "list") return;
+  const items: ListItemData[] = el.items ?? [];
+  const old = d.lines
+    .filter((ln) => ln.block_id === listId)
+    .sort((a, b) => a.line_in_block - b.line_in_block) as any[];
+  const indexed = old.some((ln) => ln.item_index != null);
+  const lineText = (it: ListItemData) => (it.marker ? it.marker + " " : "") + (it.text ?? "");
+
+  const fresh: any[] = [];
+  items.forEach((it, i) => {
+    const want = lineText(it);
+    const group = indexed
+      ? old.filter((ln) => ln.item_index === i)
+      : old.length === items.length ? [old[i]] : old.filter((ln) => ln.text.trim() === want.trim());
+    const base = { block_id: listId, is_heading: false, list_level: it.level || 0, item_index: i };
+    if (group.length && group.map((ln) => ln.text.trim()).join(" ") === want.trim()) {
+      for (const ln of group) fresh.push({ ...ln, ...base });
+    } else if (group.length) {
+      const bbox = unionBox(group.map((ln) => ln.bbox));
+      fresh.push({
+        ...group[0], ...base, text: want, bbox,
+        quad: group.length === 1 ? group[0].quad : quadFromBBox(bbox),
+      });
+    } else {
+      const bbox = rowBox(el.bbox, i, Math.max(1, items.length));
+      fresh.push({
+        text: want, bbox, ...base, line_in_block: 0,
+        font_size: Math.max(8, (bbox[3] - bbox[1]) * 0.7), font_id: null, quad: quadFromBBox(bbox),
+      });
+    }
+  });
+  fresh.forEach((ln, k) => { ln.line_in_block = k; });
+  replaceLines(d, (ln) => ln.block_id === listId, fresh);
+}
+
+/** After any change to a list's items: children links, lines and text. */
+export function afterListChange(d: Doc, listId: number): void {
+  linkListChildren(d, listId);
+  syncListLines(d, listId);
+  const el = d.layout.find((e) => e.id === listId) as any;
+  syncListText(el, d);
 }

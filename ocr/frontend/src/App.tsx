@@ -1,84 +1,204 @@
-import { useCallback, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from "@tanstack/react-query";
 
-import { listDocuments } from "./api";
+import { Stage } from "./canvas/Stage";
+import { LeftPanel } from "./panels/Left";
+import { RightPanel } from "./panels/Right";
+import { Toolbar } from "./panels/Toolbar";
+import { fetchSample, getDocument, getProject } from "./api";
 import { useStore } from "./store";
-import type { DocumentSummary } from "./types";
+import { usePageNav } from "./hooks/usePageNav";
+import { useElementKeyboard } from "./hooks/useElementKeyboard";
 
-interface PageNav {
-  prev: DocumentSummary | null;
-  next: DocumentSummary | null;
-  position: string;           // "3 / 12"
-  total: number;
-  goPrev: () => void;
-  goNext: () => void;
-  goFirst: () => void;
-  goLast: () => void;
+const qc = new QueryClient();
+
+function useDocumentIdFromHash(): string | null {
+  const [id, setId] = useState<string | null>(() =>
+    window.location.hash.replace(/^#\/?/, "") || null,
+  );
+  useEffect(() => {
+    const onChange = () =>
+      setId(window.location.hash.replace(/^#\/?/, "") || null);
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+  return id;
 }
 
-/**
- * Navigate across every page of every document in the project.
- * Ordering: by document_id then by page_number, so a 3-page PDF is
- * traversed as page 1 -> page 2 -> page 3, then the next document.
- */
-export function usePageNav(currentDocumentId: string | null): PageNav {
-  const projectId = useStore((s) => s.currentProjectId);
+function Shell() {
+  const load = useStore((s) => s.load);
+  const reloadIfClean = useStore((s) => s.reloadIfClean);
+  const requestFit = useStore((s) => s.requestFit);
+  const conflict = useStore((s) => s.conflict);
+  const setConflict = useStore((s) => s.setConflict);
+  const setProject = useStore((s) => s.setProject);
+  const currentProjectId = useStore((s) => s.currentProjectId);
+  const documentId = useDocumentIdFromHash();
+  const nav = usePageNav(documentId);
+  useElementKeyboard();
+  // Load the active project once (and whenever currentProjectId changes) so
+  // pickers/selects can read real doc_types / field_types from the backend.
+  useEffect(() => {
+    getProject(currentProjectId).then(setProject).catch(() => {});
+  }, [currentProjectId, setProject]);
 
-  const { data } = useQuery({
-    queryKey: ["documents", projectId],
-    queryFn: () => listDocuments(projectId),
-    // Match the queue's polling so navigation reflects new uploads.
-    refetchInterval: 5000,
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["document", documentId ?? "sample"],
+    queryFn: async () => {
+      if (documentId) {
+        const r = await getDocument(documentId);
+        return { doc: r.doc, revision: r.revision, image_url: r.image_url };
+      }
+      const doc = await fetchSample();
+      return { doc, revision: 1, image_url: null as string | null };
+    },
+    // Poll only when a real document is loaded.
+    refetchInterval: documentId ? 3000 : false,
+    refetchOnWindowFocus: true,
   });
 
-  const ordered = useMemo<DocumentSummary[]>(() => {
-    if (!data) return [];
-    return [...data].sort(
-      (a, b) =>
-        a.document_id.localeCompare(b.document_id) ||
-        a.page_number - b.page_number,
+  // Initial load: seed the store.
+  useEffect(() => {
+    if (data) {
+      const s = useStore.getState();
+      if (!s.doc || s.doc.document_id !== data.doc.document_id) {
+        load(data.doc, data.revision, data.image_url);
+        setTimeout(() => requestFit(), 50);
+      }
+    }
+  }, [data, load, requestFit]);
+
+  // Subsequent polls: only reload if the server revision moved and we're clean.
+  useEffect(() => {
+    if (!data) return;
+    const s = useStore.getState();
+    if (!s.doc || s.doc.document_id !== data.doc.document_id) return;
+    if (data.revision > s.serverRevision) {
+      reloadIfClean(data.doc, data.revision, data.image_url);
+    }
+  }, [data, reloadIfClean]);
+
+  // Page navigation keyboard shortcuts (N/P, ←/→, Home/End).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.metaKey || e.ctrlKey) return;
+
+      if (e.key === "n" || e.key === "N" || e.key === "ArrowRight") {
+        e.preventDefault();
+        nav.goNext();
+      } else if (e.key === "p" || e.key === "P" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        nav.goPrev();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        nav.goFirst();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        nav.goLast();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nav]);
+
+  // Wait for Noto Sans Devanagari so Konva measures text correctly.
+  const [fontsReady] = useStateReady();
+
+  if (isLoading || !fontsReady) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+        Loading document…
+      </div>
     );
-  }, [data]);
+  }
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-rose-400">
+        {String(error)}
+      </div>
+    );
+  }
 
-  const idx = useMemo(
-    () => ordered.findIndex((d) => d.document_id === currentDocumentId),
-    [ordered, currentDocumentId],
+  return (
+    <div className="flex h-full flex-col">
+      <Toolbar />
+
+      {conflict === "remote-newer" && (
+        <div className="flex items-center gap-2 border-b border-amber-800 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-200">
+          <span>
+            Server has newer edits. Reload and discard your local changes?
+          </span>
+          <button
+            onClick={() => {
+              // Force reload: bypass the dirty check
+              if (data) {
+                useStore.setState({
+                  doc: data.doc,
+                  revision: data.revision,
+                  serverRevision: data.revision,
+                  imageUrl: data.image_url,
+                  past: [],
+                  future: [],
+                  dirty: false,
+                  conflict: "none",
+                });
+              }
+            }}
+            className="rounded bg-amber-800 px-2 py-0.5 text-[11px] hover:bg-amber-700"
+          >
+            Reload
+          </button>
+          <button
+            onClick={() => setConflict("none")}
+            className="ml-auto text-[11px] text-amber-300 hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1">
+        <LeftPanel projectId={1} />
+        <main className="relative flex-1">
+          <Stage />
+        </main>
+        <RightPanel />
+      </div>
+    </div>
   );
+}
 
-  const prev = idx > 0 ? ordered[idx - 1] : null;
-  const next = idx >= 0 && idx < ordered.length - 1 ? ordered[idx + 1] : null;
-  const position = idx >= 0 && ordered.length > 0
-    ? `${idx + 1} / ${ordered.length}`
-    : "—";
+function useStateReady() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    document.fonts?.ready?.then(() => {
+      if (!cancelled) setReady(true);
+    }) ?? setReady(true);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return [ready, setReady] as const;
+}
 
-  const go = useCallback(
-    (id: string | null | undefined) => {
-      if (!id) return;
-      // Refuse to silently drop edits the autosave hasn't sent yet. The
-      // autosave debounce is short (<1 s), so clicking No and then Next
-      // again is usually enough to let the pending save fire.
-      if (currentDocumentId && useStore.getState().dirty) {
-        const ok = window.confirm(
-          "You have unsaved changes that haven't been sent to the server yet.\n\n" +
-            "Leave without saving? (Cancel, then wait a moment before navigating again to let autosave finish.)",
-        );
-        if (!ok) return;
-      }
-      if (window.location.hash !== `#/${id}`) {
-        window.location.hash = `#/${id}`;
-      }
-    },
-    [currentDocumentId],
+export default function App() {
+  return (
+    <QueryClientProvider client={qc}>
+      <Shell />
+    </QueryClientProvider>
   );
-
-  return {
-    prev,
-    next,
-    position,
-    total: ordered.length,
-    goPrev: () => go(prev?.document_id),
-    goNext: () => go(next?.document_id),
-    goFirst: () => go(ordered[0]?.document_id),
-    goLast: () => go(ordered[ordered.length - 1]?.document_id),
-  };
 }

@@ -3,6 +3,7 @@ import { ocrTable } from "../api";
 import { useStore } from "../store";
 import { ModelPicker } from "./ModelPicker";
 import { useOcrPrefs } from "../hooks/useOcrPrefs";
+import { syncTable } from "./commands";
 
 interface Props {
   documentId: string;
@@ -38,6 +39,8 @@ export function TableOcrButton({ documentId, tableElementId, quad }: Props) {
         const idx = el.table_index;
         if (typeof idx !== "number" || idx < 0 || idx >= d.tables.length) return;
         d.tables[idx] = r.table;
+        // one line per cell + ruling lines for the detected grid
+        syncTable(d, tableElementId, { ruling: true });
       });
 
       setInfo(

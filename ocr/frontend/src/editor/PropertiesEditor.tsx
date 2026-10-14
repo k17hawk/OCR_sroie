@@ -13,13 +13,64 @@ import {
   setElementText, resizeLayoutElement, emptyTable, parentLayoutOf,
   appendReadingOrder, removeFromReadingOrder, nextReadingOrder,
   isReadingOrderLocked, addLayoutElement, syncListText, listItemsFromText,
+  formFieldText, tableText, syncTable,
+  afterListChange, attachToListItem, detachFromList, listChildCandidates,
+  autoAttachListChildren,
 } from "./commands";
+
+/** Types with no text of their own on the server: no generic text box. */
+const NO_TEXT_BOX = new Set(["logo", "figure", "signature", "stamp"]);
+const TEXT_HINT: Record<string, string> = {
+  form_field: "One field per line: label: value",
+  table: "Table HTML: <tr><td>…</td></tr>, <th> for headers, rowspan / colspan allowed, <td data-handwritten> for handwritten cells. (Rows of cells separated by | also work.)",
+};
+
+/**
+ * Text box that keeps exactly what you type while it has focus. Form-field
+ * and table text is rebuilt from the saved fields / cells; showing that
+ * rebuilt text on every keystroke moved the cursor and swallowed new lines
+ * and half-typed HTML. Every keystroke is still applied to the document.
+ */
+function DraftTextarea({
+  value, onChange, rows,
+}: { value: string; onChange: (v: string) => void; rows?: number }) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setDraft(value);
+  }, [value, focused]);
+  return (
+    <div
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+      }}
+    >
+      <DevanagariTextarea
+        value={draft}
+        onChange={(v) => { setDraft(v); onChange(v); }}
+        rows={rows}
+      />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function elementText(el: LayoutElement, doc: Doc): string {
+  // derived types: show the data the server actually keeps
+  if (el.type === "form_field") return formFieldText(el);
+  if (el.type === "table") return tableText(doc, el);
+  // a region made of OCR lines: one row per line, so editing keeps the lines
+  // (its own text joins them with a space and would merge them into one)
+  if (el.type !== "heading" && el.type !== "list") {
+    const own = doc.lines
+      .filter((ln) => ln.block_id === el.id)
+      .sort((a, b) => a.line_in_block - b.line_in_block);
+    if (own.length > 1) return own.map((ln) => ln.text).join("\n");
+  }
   const own = "text" in el ? ((el as any).text as string) : "";
   if (own && own.length > 0) return own;
   return doc.lines
@@ -189,7 +240,7 @@ function applyTypeChange(d: Doc, id: number, next: string) {
       target.items = listItemsFromText(txt);
     }
     if (!target.list_style) target.list_style = "bullet";
-    syncListText(target);
+    syncListText(target, d);
   }
   if (next === "signature" && target.signer == null) target.signer = "other";
   if (next === "stamp" && target.stamp_text == null) target.stamp_text = "";
@@ -430,14 +481,18 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
         </div>
       </Section>
 
-      {el.type !== "logo" && (
-        <Section label="text">
-          <DevanagariTextarea
+      {!NO_TEXT_BOX.has(el.type) && (
+        <Section label={el.type === "table" ? "table html" : "text"}>
+          <DraftTextarea
+            key={el.id}
             value={elementText(el, doc)}
             onChange={(v) => edit((d) => setElementText(d, el.id, v))}
-            rows={4}
+            rows={el.type === "table" ? 8 : 4}
           />
-          {showingJoined && (
+          {TEXT_HINT[el.type] && (
+            <div className="mt-1 text-[10px] text-slate-500">{TEXT_HINT[el.type]}</div>
+          )}
+          {showingJoined && !TEXT_HINT[el.type] && (
             <div className="mt-1 text-[10px] text-slate-500">
               Showing text joined from {joinedFromLines} line
               {joinedFromLines === 1 ? "" : "s"}. Editing here rewrites
@@ -523,7 +578,7 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
         </Section>
       )}
 
-      {el.type === "list" && <ListEditor el={el} />}
+      {el.type === "list" && <ListEditor doc={doc} el={el} />}
       {el.type === "form_field" && <FormFieldEditor el={el} />}
 
       {el.type === "table" && (
@@ -562,8 +617,22 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
 // List item editor
 // ---------------------------------------------------------------------------
 
-function ListEditor({ el }: { el: any }) {
+function ListEditor({ doc, el }: { doc: Doc; el: any }) {
   const edit = useStore((s) => s.edit);
+  const setSelection = useStore((s) => s.setSelection);
+  // every change to the items keeps children links, lines and text in step
+  const change = (fn: (t: any, d: Doc) => void) => edit((d) => {
+    const t = d.layout.find((x) => x.id === el.id) as any;
+    if (!t) return;
+    fn(t, d);
+    afterListChange(d, el.id);
+  });
+  const candidates = listChildCandidates(doc, el.id);
+  const label = (id: number) => {
+    const c = doc.layout.find((e) => e.id === id) as any;
+    return c ? `#${id} ${prettyType(c.type)}` : `#${id} (missing)`;
+  };
+
   return (
     <Section label={`list items (${el.items.length})`}>
       <select
@@ -579,56 +648,97 @@ function ListEditor({ el }: { el: any }) {
         ))}
       </select>
 
-      <ul className="space-y-1">
+      <ul className="space-y-2">
         {el.items.map((item: any, i: number) => (
-          <li key={i} className="flex gap-1">
-            <input
-              value={item.marker}
-              onChange={(e) => edit((d) => {
-                const t = d.layout.find((x) => x.id === el.id) as any;
-                if (t) { t.items[i].marker = e.target.value; syncListText(t); }
-              })}
-              className="w-10 rounded bg-slate-800 px-1 text-center font-mono text-[11px] text-slate-100"
-            />
-            <input
-              type="number"
-              value={item.level}
-              onChange={(e) => edit((d) => {
-                const t = d.layout.find((x) => x.id === el.id) as any;
-                if (t) { t.items[i].level = Number(e.target.value); syncListText(t); }
-              })}
-              className="w-10 rounded bg-slate-800 px-1 text-center text-[11px] text-slate-100"
-            />
-            <input
-              value={item.text}
-              onChange={(e) => edit((d) => {
-                const t = d.layout.find((x) => x.id === el.id) as any;
-                if (t) { t.items[i].text = e.target.value; syncListText(t); }
-              })}
-              className="flex-1 rounded bg-slate-800 px-2 py-0.5 font-deva text-[11px] text-slate-100"
-            />
-            <button
-              onClick={() => edit((d) => {
-                const t = d.layout.find((x) => x.id === el.id) as any;
-                if (t) { t.items.splice(i, 1); syncListText(t); }
-              })}
-              className="rounded bg-slate-800 px-1 text-[10px] text-slate-400 hover:text-rose-300"
-            >
-              ×
-            </button>
+          <li key={i} className="space-y-1">
+            <div className="flex gap-1">
+              <input
+                value={item.marker}
+                title="marker"
+                onChange={(e) => change((t) => { t.items[i].marker = e.target.value; })}
+                className="w-10 rounded bg-slate-800 px-1 text-center font-mono text-[11px] text-slate-100"
+              />
+              <input
+                type="number"
+                min={0}
+                value={item.level}
+                title="level (indent)"
+                onChange={(e) => change((t) => { t.items[i].level = Math.max(0, Number(e.target.value)); })}
+                className="w-10 rounded bg-slate-800 px-1 text-center text-[11px] text-slate-100"
+              />
+              <input
+                value={item.text}
+                onChange={(e) => change((t) => { t.items[i].text = e.target.value; })}
+                className="flex-1 rounded bg-slate-800 px-2 py-0.5 font-deva text-[11px] text-slate-100"
+              />
+              <button
+                title="remove item"
+                onClick={() => change((t) => { t.items.splice(i, 1); })}
+                className="rounded bg-slate-800 px-1 text-[10px] text-slate-400 hover:text-rose-300"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* boxes that belong to this item (a note, a figure, …) */}
+            <div className="flex flex-wrap items-center gap-1 pl-12">
+              {(item.children ?? []).map((cid: number) => (
+                <span key={cid} className="flex items-center gap-1 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-200">
+                  <button
+                    title="select this box"
+                    onClick={() => setSelection({ kind: "layout", id: cid })}
+                    className="hover:underline"
+                  >
+                    ↳ {label(cid)}
+                  </button>
+                  <button
+                    title="detach from this item"
+                    onClick={() => edit((d) => detachFromList(d, el.id, cid))}
+                    className="text-slate-400 hover:text-rose-300"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              {candidates.some((c) => !(item.children ?? []).includes(c.id)) && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const cid = Number(e.target.value);
+                    if (Number.isFinite(cid)) edit((d) => attachToListItem(d, el.id, i, cid));
+                  }}
+                  className="rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-400"
+                >
+                  <option value="">+ attach box…</option>
+                  {candidates
+                    .filter((c) => !(item.children ?? []).includes(c.id))
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {label(c.id)}{c.parent_id != null ? ` (now in item ${c.parent_item})` : ""}
+                      </option>
+                    ))}
+                </select>
+              )}
+            </div>
           </li>
         ))}
       </ul>
 
       <button
-        onClick={() => edit((d) => {
-          const t = d.layout.find((x) => x.id === el.id) as any;
-          if (t) { t.items.push({ marker: "•", level: 0, text: "" }); syncListText(t); }
-        })}
-        className="mt-1 w-full rounded bg-slate-800 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700"
+        onClick={() => change((t) => { t.items.push({ marker: "•", level: 0, text: "" }); })}
+        className="mt-2 w-full rounded bg-slate-800 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700"
       >
         + item
       </button>
+      {candidates.length > 0 && (
+        <button
+          onClick={() => edit((d) => { autoAttachListChildren(d, el.id); })}
+          title="Each box inside the list goes to the item it sits under"
+          className="mt-1 w-full rounded bg-sky-800 py-0.5 text-[10px] text-sky-100 hover:bg-sky-700"
+        >
+          Attach the {candidates.length} box{candidates.length === 1 ? "" : "es"} inside this list to their items
+        </button>
+      )}
     </Section>
   );
 }
@@ -875,7 +985,15 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
       <Section label="text">
         <DevanagariTextarea
           value={ln.text}
-          onChange={(v) => edit((d) => { d.lines[index].text = v; })}
+          onChange={(v) => edit((d) => {
+            const ln = d.lines[index];
+            ln.text = v;
+            // a table line IS its cell's text: keep the cell in step
+            if (ln.table_index != null && ln.cell_id != null) {
+              const c = d.tables[ln.table_index]?.cells.find((x) => x.id === ln.cell_id);
+              if (c) { c.text = v; c.empty = v.trim() === ""; }
+            }
+          })}
           rows={3}
         />
       </Section>
@@ -897,8 +1015,14 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
             type="checkbox"
             checked={ln.handwritten === true}
             onChange={(e) => edit((d) => {
-              if (e.target.checked) d.lines[index].handwritten = true;
-              else delete d.lines[index].handwritten;
+              const ln = d.lines[index];
+              if (e.target.checked) ln.handwritten = true;
+              else delete ln.handwritten;
+              // table line: the cell carries the same flag
+              if (ln.table_index != null && ln.cell_id != null) {
+                const c = d.tables[ln.table_index]?.cells.find((x) => x.id === ln.cell_id);
+                if (c) c.handwritten = e.target.checked;
+              }
             })}
           />
           <span className="text-slate-400">handwritten</span>
@@ -937,6 +1061,11 @@ function CellEditor({
   const edit = useStore((s) => s.edit);
   const t = doc.tables[tableIndex];
   const cell = t?.cells.find((c) => c.id === cellId);
+  // keep the table's lines (and, for span changes, ruling lines) in step
+  const syncThis = (d: Doc, ruling = false) => {
+    const el = d.layout.find((e: any) => e.type === "table" && e.table_index === tableIndex);
+    if (el) syncTable(d, el.id, { ruling });
+  };
   if (!cell) return <div className="text-xs text-rose-400">missing cell</div>;
 
   return (
@@ -962,6 +1091,7 @@ function CellEditor({
             const c = d.tables[tableIndex].cells.find((x) => x.id === cellId)!;
             c.text = v;
             c.empty = v.trim() === "";
+            syncThis(d);
           })}
           rows={2}
         />
@@ -974,6 +1104,7 @@ function CellEditor({
             checked={cell.handwritten}
             onChange={(e) => edit((d) => {
               d.tables[tableIndex].cells.find((x) => x.id === cellId)!.handwritten = e.target.checked;
+              syncThis(d);
             })}
           />
           <span>handwritten</span>
@@ -990,6 +1121,7 @@ function CellEditor({
               value={cell.rowspan}
               onChange={(e) => edit((d) => {
                 d.tables[tableIndex].cells.find((x) => x.id === cellId)!.rowspan = Math.max(1, Number(e.target.value));
+                syncThis(d, true);
               })}
               className="mt-0.5 w-full rounded bg-slate-800 px-1 text-slate-100"
             />
@@ -1002,6 +1134,7 @@ function CellEditor({
               value={cell.colspan}
               onChange={(e) => edit((d) => {
                 d.tables[tableIndex].cells.find((x) => x.id === cellId)!.colspan = Math.max(1, Number(e.target.value));
+                syncThis(d, true);
               })}
               className="mt-0.5 w-full rounded bg-slate-800 px-1 text-slate-100"
             />
