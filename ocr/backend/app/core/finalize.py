@@ -101,7 +101,8 @@ def _derive_digit_style(text: str, current: str) -> str:
     if has_dev and has_lat:
         return "mixed"
     if has_dev:
-        return "devanagari"
+        # keep the page's spelling ("dev" in the reference data)
+        return current if current in ("dev", "devanagari") else "devanagari"
     if has_lat:
         return "latin"
     return current
@@ -152,7 +153,7 @@ def finalize(doc: Doc) -> Doc:
             el.text = serialize_form_field(el.fields)
 
         elif isinstance(el, ListLayout):
-            el.text = serialize_list(el.items)
+            pass  # after the loop: needs its children's final text
 
         elif isinstance(el, TableLayout):
             table = doc.tables[el.table_index]
@@ -167,8 +168,43 @@ def finalize(doc: Doc) -> Doc:
             # header, paragraph, signature_caption, footer
             block_lines = lines_by_block.get(el.id, [])
             if block_lines:
-                el.text = "\n".join(ln.text for ln in block_lines)
+                # wrapped lines of one region read as one text, joined by a
+                # space (as in the reference pages), not by a newline
+                el.text = " ".join(ln.text.strip() for ln in block_lines if ln.text.strip())
             # else: no lines — keep el.text as typed by the human
+
+    # ------------------------------------------------------------------
+    # 1b) Lists: items may own other boxes (a note, a figure, …) through
+    #     ``children``. Keep parent_id / parent_item on those boxes in step
+    #     with ``children`` (children win), then build the list text with
+    #     each child's text indented under its item.
+    # ------------------------------------------------------------------
+    by_id = {el.id: el for el in doc.layout}
+    owned: dict[int, tuple[int, int]] = {}
+    for el in doc.layout:
+        if not isinstance(el, ListLayout):
+            continue
+        for i, item in enumerate(el.items):
+            if item.children is None:
+                continue
+            kept = [c for c in item.children if c in by_id and c != el.id and c not in owned]
+            for c in kept:
+                owned[c] = (el.id, i)
+            item.children = kept or None
+    for el in doc.layout:
+        if el.id in owned:
+            el.parent_id, el.parent_item = owned[el.id]
+            el.reading_order = None  # read as part of the list item
+        elif getattr(el, "parent_id", None) is not None:
+            el.parent_id = el.parent_item = None
+
+    def _child_text(cid: int) -> str | None:
+        child = by_id.get(cid)
+        return getattr(child, "text", None) if child is not None else None
+
+    for el in doc.layout:
+        if isinstance(el, ListLayout):
+            el.text = serialize_list(el.items, _child_text)
 
     # ------------------------------------------------------------------
     # 2) Recompute blocks from layout (same order as layout).

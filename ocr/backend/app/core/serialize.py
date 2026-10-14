@@ -5,6 +5,8 @@ string, so the exporter and the frontend preview are guaranteed identical.
 """
 from __future__ import annotations
 
+from typing import Callable
+
 from app.schemas.doc_v2 import (
     CheckboxOption,
     FormFieldEntry,
@@ -37,17 +39,28 @@ def serialize_form_field(fields: list[FormFieldEntry]) -> str:
     return "\n".join(out)
 
 
-def serialize_list(items: list[ListItem]) -> str:
+def serialize_list(
+    items: list[ListItem],
+    child_text: "Callable[[int], str | None] | None" = None,
+) -> str:
     """Each item on its own line, indented 2 spaces per level.
 
     Bullet markers become ``-``; non-bullet markers (``१.``, ``क)``) are kept
-    verbatim.
+    verbatim. An item's ``children`` (a note, a figure, … inside the item)
+    follow it, one level deeper; ``child_text(id)`` gives each child's text.
     """
     out: list[str] = []
     for item in items:
         indent = "  " * item.level
         marker = "-" if item.marker in _BULLET_MARKERS else item.marker
         out.append(f"{indent}{marker} {item.text}")
+        if child_text is not None:
+            for cid in item.children or []:
+                text = child_text(cid)
+                if not text:
+                    continue
+                for part in text.split("\n"):
+                    out.append(f"{indent}  {part}")
     return "\n".join(out)
 
 

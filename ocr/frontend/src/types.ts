@@ -3,7 +3,7 @@ export type BBox = [number, number, number, number];
 export type Quad = [Point, Point, Point, Point];
 
 export type Language = "ne" | "hi" | "en" | "mixed";
-export type DigitStyle = "devanagari" | "latin" | "mixed";
+export type DigitStyle = "devanagari" | "dev" | "latin" | "mixed";
 
 export type AnnotationSource = "synthetic" | "real";
 export type AnnotationStatus =
@@ -51,6 +51,8 @@ export interface ListItem {
   marker: string;
   level: number;
   text: string;
+  /** ids of layout elements that belong to this item (a note, a figure, …) */
+  children?: number[];
 }
 
 export interface HeaderLayout {
@@ -155,7 +157,7 @@ export interface StampLayout {
   quad: Quad;
 }
 
-export type LayoutElement =
+export type LayoutElement = NestedIn & (
   | HeaderLayout
   | HeadingLayout
   | FigureLayout
@@ -167,7 +169,13 @@ export type LayoutElement =
   | FooterLayout
   | LogoLayout
   | SignatureLayout
-  | StampLayout;
+  | StampLayout);
+
+/** Set on a box that belongs to a list item (see ListItem.children). */
+export interface NestedIn {
+  parent_id?: number | null;
+  parent_item?: number | null;
+}
 
 export type LayoutType = LayoutElement["type"];
 
