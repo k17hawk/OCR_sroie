@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ocr-backend"
+version = "0.1.0"
+description = "OCR backend"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic",
+    "pydantic-settings",
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "psycopg[binary]",        # Postgres prod
+    "python-multipart",       # file uploads
+    "Pillow",                 # image size + PDF page rasterization
+    "pypdf",                  # PDF page count
+    "python-jose[cryptography]",  # JWT
+    "passlib[bcrypt]",
+    "jsonpatch",              # PATCH support
+    "aiofiles",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]"]
+pdf = ["pdf2image"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
