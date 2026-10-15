@@ -1,0 +1,2024 @@
+From 595021ba139e9ff834374603cfae1f040e2efb7b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 15:19:21 -0700
+Subject: [PATCH 1/2] Fix table cell detection, save errors, handwriting
+ regions
+
+Table OCR
+- New table_structure.py builds the grid from the page image: ruling
+  lines first, then the table model, then the text lines, per axis.
+  Deskews the region (quad angle + projection refine) and maps cell
+  quads back, so rotated scans keep straight rows.
+- Spans from missing rules (colspan/rowspan), header rows from <th> or
+  first-row spans; ruling_style detected.
+- Each OCR line goes to one cell; a line spanning a whole row is split
+  by where the ink is, not copied into every cell.
+- Removed the 2x2 placeholder grids (mock/paddle) that replaced real
+  structure; adapters get the deskewed crop; TATR returns raw row/col
+  boxes; empty cells with ink are read with the recognizer.
+
+Saving
+- PUT /annotation takes raw JSON so _clean_payload runs before
+  validation (a .5 bbox or leftover key no longer 422s).
+- Line key order: handwritten after table_index/cell_id (matches the
+  reference pages; saved JSON is now byte-identical to the sample).
+- Editor: one saveCurrent() for Save, Ctrl/Cmd+S and Submit; shows
+  Saving/Saved/errors, asks before overwriting on 409, keeps edits made
+  during the request marked unsaved.
+
+Handwriting
+- New handwriting boxes get subtype "note" + handwritten true; subtype
+  picker; export marks their lines handwritten.
+
+Tests: backend/tests/test_table_structure.py (10 cases).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DLvEwCHn5XK6jH4s6BTiCE
+---
+ ocr/backend/app/api/documents.py             |   5 +-
+ ocr/backend/app/pipeline/adapters/paddle.py  |  23 +-
+ ocr/backend/app/pipeline/adapters/tatr.py    |   6 +-
+ ocr/backend/app/pipeline/table_ocr.py        | 240 +++---
+ ocr/backend/app/pipeline/table_structure.py  | 724 +++++++++++++++++++
+ ocr/backend/app/schemas/api.py               |   6 +-
+ ocr/backend/app/schemas/doc_v2.py            |   4 +-
+ ocr/backend/pyproject.toml                   |   1 +
+ ocr/backend/tests/test_table_structure.py    | 234 ++++++
+ ocr/frontend/src/editor/PropertiesEditor.tsx |  24 +
+ ocr/frontend/src/editor/commands.ts          |   4 +
+ ocr/frontend/src/editor/normalizeDoc.ts      |  14 +-
+ ocr/frontend/src/editor/save.ts              |  98 +++
+ ocr/frontend/src/lib.ts                      |   1 +
+ ocr/frontend/src/panels/Right.tsx            |   5 +-
+ ocr/frontend/src/panels/Toolbar.tsx          |  78 +-
+ ocr/frontend/src/store.ts                    |  11 +
+ ocr/frontend/src/types.ts                    |  15 +-
+ 18 files changed, 1326 insertions(+), 167 deletions(-)
+ create mode 100644 ocr/backend/app/pipeline/table_structure.py
+ create mode 100644 ocr/backend/tests/test_table_structure.py
+ create mode 100644 ocr/frontend/src/editor/save.ts
+
+diff --git a/ocr/backend/app/api/documents.py b/ocr/backend/app/api/documents.py
+index 0bf1bc6..3ada53e 100644
+--- a/ocr/backend/app/api/documents.py
++++ b/ocr/backend/app/api/documents.py
+@@ -73,7 +73,7 @@ def put_annotation(document_id: str, body: AnnotationPut) -> DocumentRead:
+         raise HTTPException(500, "project missing for document")
+     row = ann_service.replace(
+         row=row, project=project,
+-        payload=body.doc.model_dump(mode="json"),
++        payload=body.doc,
+         revision=body.revision, user_id=None,
+     )
+     return _read_doc_response(row)
+@@ -192,7 +192,8 @@ def ocr_table(document_id: str, body: TableOcrRequest) -> TableOcrResponse:
+ 
+     try:
+         table = recognize_table(
+-            doc=row.doc, img=img, quad=body.quad, adapter=adapters["table"]
++            doc=row.doc, img=img, quad=body.quad, adapter=adapters["table"],
++            rec=adapters.get("rec"), lang_hint=body.lang_hint,
+         )
+     except RuntimeError as e:
+         raise HTTPException(501, str(e)) from e
+diff --git a/ocr/backend/app/pipeline/adapters/paddle.py b/ocr/backend/app/pipeline/adapters/paddle.py
+index d960e8b..a1ceafe 100644
+--- a/ocr/backend/app/pipeline/adapters/paddle.py
++++ b/ocr/backend/app/pipeline/adapters/paddle.py
+@@ -214,10 +214,11 @@ class PaddleTable:
+     ) -> dict[str, Any]:
+         self._load()
+ 
+-        # If the engine isn't available, return a uniform 2x2 grid over the
+-        # quad so downstream code still gets a valid Table structure.
++        # Engine missing: report "no structure". table_ocr then builds the
++        # grid from ruling lines / text. (A made-up 2x2 grid here used to
++        # override that and lose every other <td>.)
+         if self._engine_kind == "unavailable":
+-            return _uniform_grid(table_quad, rows=2, cols=2)
++            return dict(_NO_TABLE)
+ 
+         arr = np.asarray(img.convert("RGB"))
+ 
+@@ -230,7 +231,7 @@ class PaddleTable:
+                         if html:
+                             return {"html": html, "rows": 0, "cols": 0, "cells": []}
+                 # No table found — fall back
+-                return _uniform_grid(table_quad, rows=2, cols=2)
++                return dict(_NO_TABLE)
+ 
+             if self._engine_kind == "pipeline":
+                 result = self._engine.predict(arr)
+@@ -238,7 +239,7 @@ class PaddleTable:
+                     html = item.get("html") or item.get("pred_html") or ""
+                     if html:
+                         return {"html": html, "rows": 0, "cols": 0, "cells": []}
+-                return _uniform_grid(table_quad, rows=2, cols=2)
++                return dict(_NO_TABLE)
+ 
+             if self._engine_kind == "tablesystem":
+                 result = self._engine(arr)
+@@ -249,22 +250,22 @@ class PaddleTable:
+                 ) or ""
+                 if html:
+                     return {"html": html, "rows": 0, "cols": 0, "cells": []}
+-                return _uniform_grid(table_quad, rows=2, cols=2)
++                return dict(_NO_TABLE)
+ 
+         except Exception as e:  # noqa: BLE001
+             # Don't crash the whole OCR pipeline on a table-detection failure.
+-            return {
+-                **_uniform_grid(table_quad, rows=2, cols=2),
+-                "_error": f"paddle table failed: {e}",
+-            }
++            return {**_NO_TABLE, "_error": f"paddle table failed: {e}"}
+ 
+-        return _uniform_grid(table_quad, rows=2, cols=2)
++        return dict(_NO_TABLE)
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # Fallback grid
+ # ---------------------------------------------------------------------------
+ 
++_NO_TABLE: dict[str, Any] = {"rows": 0, "cols": 0, "cells": []}
++
++
+ def _uniform_grid(
+     quad: list[list[float]], *, rows: int, cols: int
+ ) -> dict[str, Any]:
+diff --git a/ocr/backend/app/pipeline/adapters/tatr.py b/ocr/backend/app/pipeline/adapters/tatr.py
+index 12074f5..987f578 100644
+--- a/ocr/backend/app/pipeline/adapters/tatr.py
++++ b/ocr/backend/app/pipeline/adapters/tatr.py
+@@ -59,7 +59,7 @@ class TableTransformer:
+ 
+         target_sizes = torch.tensor([img.size[::-1]])
+         results = processor.post_process_object_detection(
+-            outputs, threshold=0.6, target_sizes=target_sizes
++            outputs, threshold=0.5, target_sizes=target_sizes
+         )[0]
+ 
+         rows_det: list[dict[str, Any]] = []
+@@ -97,4 +97,8 @@ class TableTransformer:
+             "rows": len(rows_det),
+             "cols": len(cols_det),
+             "cells": cells,
++            # raw detections: table_ocr uses them per axis when the image
++            # has no ruling lines for that axis
++            "row_boxes": [r["bbox"] for r in rows_det],
++            "col_boxes": [c["bbox"] for c in cols_det],
+         }
+\ No newline at end of file
+diff --git a/ocr/backend/app/pipeline/table_ocr.py b/ocr/backend/app/pipeline/table_ocr.py
+index 6d934b4..5aaf8f3 100644
+--- a/ocr/backend/app/pipeline/table_ocr.py
++++ b/ocr/backend/app/pipeline/table_ocr.py
+@@ -1,7 +1,9 @@
+-"""Table structure recognition helpers.
++"""Table structure recognition.
+ 
+-Runs the ``table`` adapter on a sub-region and produces a fully populated
+-``Table`` object with cell text drawn from the document's existing lines.
++Builds a fully populated ``Table`` for a region of the page: grid from the
++image / table model / text lines (see ``table_structure``), cell text from
++the document's existing lines. The old version fell back to a 2x2 grid
++whenever the model gave nothing usable, which is why cells went missing.
+ """
+ from __future__ import annotations
+ 
+@@ -14,93 +16,29 @@ from app.schemas.doc_v2 import Doc, Table, TableCell
+ 
+ 
+ # ---------------------------------------------------------------------------
+-# Bbox overlap helpers
+-# ---------------------------------------------------------------------------
+-
+-def _area(bbox: list[int]) -> int:
+-    return max(0, bbox[2] - bbox[0]) * max(0, bbox[3] - bbox[1])
+-
+-
+-def _overlap(a: list[int], b: list[int]) -> int:
+-    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+-    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+-    if x1 <= x0 or y1 <= y0:
+-        return 0
+-    return (x1 - x0) * (y1 - y0)
+-
+-
+-def _quad_from_bbox(b: list[int]) -> list[list[float]]:
+-    return [
+-        [float(b[0]), float(b[1])],
+-        [float(b[2]), float(b[1])],
+-        [float(b[2]), float(b[3])],
+-        [float(b[0]), float(b[3])],
+-    ]
+-
+-
+-# ---------------------------------------------------------------------------
+-# Adapter output normalization
++# Public entry point
+ # ---------------------------------------------------------------------------
+ 
+-def _normalize_cells(raw: dict[str, Any], quad: list[list[float]]) -> tuple[
+-    int, int, int, list[dict[str, Any]]
+-]:
+-    """Return (rows, cols, header_rows, cells) regardless of adapter shape."""
+-
+-    # Case 1: already a grid — ``cells`` have explicit row/col.
+-    cells_raw = raw.get("cells") or []
+-    if cells_raw and "row" in cells_raw[0] and "col" in cells_raw[0]:
+-        rows = int(raw.get("rows") or max(c["row"] for c in cells_raw) + 1)
+-        cols = int(raw.get("cols") or max(c["col"] for c in cells_raw) + 1)
+-        header_rows = int(raw.get("header_rows", 1))
+-        return rows, cols, header_rows, cells_raw
+-
+-    # Case 2: TATR-style — rows and columns are separate detections.
+-    rows_det = [c for c in cells_raw if c.get("kind") == "table row"]
+-    cols_det = [c for c in cells_raw if c.get("kind") == "table column"]
+-    if rows_det and cols_det:
+-        rows = len(rows_det)
+-        cols = len(cols_det)
+-        header_rows = 1
+-        cells: list[dict[str, Any]] = []
+-        for r, rb in enumerate(sorted(rows_det, key=lambda c: c["bbox"][1])):
+-            for c, cb in enumerate(sorted(cols_det, key=lambda c: c["bbox"][0])):
+-                x0 = max(rb["bbox"][0], cb["bbox"][0])
+-                y0 = max(rb["bbox"][1], cb["bbox"][1])
+-                x1 = min(rb["bbox"][2], cb["bbox"][2])
+-                y1 = min(rb["bbox"][3], cb["bbox"][3])
+-                if x1 > x0 and y1 > y0:
+-                    cells.append({
+-                        "row": r, "col": c,
+-                        "rowspan": 1, "colspan": 1,
+-                        "bbox": [int(x0), int(y0), int(x1), int(y1)],
+-                    })
+-        if cells:
+-            return rows, cols, header_rows, cells
+-
+-    # Case 3: fallback — uniform grid.
+-    rows, cols, header_rows = 2, 2, 1
+-    x0 = int(min(p[0] for p in quad))
+-    y0 = int(min(p[1] for p in quad))
+-    x1 = int(max(p[0] for p in quad))
+-    y1 = int(max(p[1] for p in quad))
+-    cells = []
+-    for r in range(rows):
+-        for c in range(cols):
+-            cx0 = x0 + (x1 - x0) * c // cols
+-            cx1 = x0 + (x1 - x0) * (c + 1) // cols
+-            cy0 = y0 + (y1 - y0) * r // rows
+-            cy1 = y0 + (y1 - y0) * (r + 1) // rows
+-            cells.append({
+-                "row": r, "col": c, "rowspan": 1, "colspan": 1,
+-                "bbox": [cx0, cy0, cx1, cy1],
+-            })
+-    return rows, cols, header_rows, cells
+-
++def _shift_raw(raw: dict[str, Any], frame: Any) -> dict[str, Any]:
++    """Adapter boxes are in crop coords already (we pass it the crop)."""
++    out = dict(raw or {})
++    # adapters that only return a grid of cells: turn it into row/col boxes
++    cells = out.get("cells") or []
++    if cells and not out.get("row_boxes") and "row" in cells[0] and "bbox" in cells[0]:
++        rows: dict[int, list[float]] = {}
++        cols: dict[int, list[float]] = {}
++        for c in cells:
++            b = c["bbox"]
++            r = rows.setdefault(int(c["row"]), [b[0], b[1], b[2], b[3]])
++            r[1] = min(r[1], b[1]); r[3] = max(r[3], b[3])
++            k = cols.setdefault(int(c["col"]), [b[0], b[1], b[2], b[3]])
++            k[0] = min(k[0], b[0]); k[2] = max(k[2], b[2])
++        if len(rows) >= 2:
++            out["row_boxes"] = [rows[k] for k in sorted(rows)]
++        if len(cols) >= 2:
++            out["col_boxes"] = [cols[k] for k in sorted(cols)]
++    return out
+ 
+-# ---------------------------------------------------------------------------
+-# Public entry point
+-# ---------------------------------------------------------------------------
+ 
+ def recognize_table(
+     *,
+@@ -108,51 +46,105 @@ def recognize_table(
+     img: Image,
+     quad: list[list[float]],
+     adapter: Any,
++    rec: Any = None,
++    lang_hint: str = "ne",
+ ) -> Table:
+-    """Run table structure recognition and populate cell text from existing lines."""
+-    raw = adapter.recognize(img, quad)
+-    rows, cols, header_rows, cells_raw = _normalize_cells(raw, quad)
++    """Find every row / column / cell of the table inside ``quad``.
++
++    The grid comes from the image (ruling lines) first, then the table model,
++    then the page's text lines - per axis, so a table with only horizontal
++    rules still gets its columns from the text. Cell text comes from the
++    page's existing lines; cells with ink but no line are read with ``rec``
++    (when it is a real recognizer).
++    """
++    from app.pipeline import table_structure as ts
++
++    frame = ts.make_frame(img, quad)
++
++    raw: dict[str, Any] = {}
++    try:
++        rx0, ry0, rx1, ry1 = frame.region
++        sub = frame.img.crop((rx0, ry0, rx1, ry1))
++        sub_quad = [[0.0, 0.0], [float(rx1 - rx0), 0.0],
++                    [float(rx1 - rx0), float(ry1 - ry0)], [0.0, float(ry1 - ry0)]]
++        got = adapter.recognize(sub, sub_quad) or {}
++        # back to crop coords
++        def mv(b): return [b[0] + rx0, b[1] + ry0, b[2] + rx0, b[3] + ry0]
++        for key in ("cells", "row_boxes", "col_boxes"):
++            if got.get(key):
++                got[key] = [({**c, "bbox": mv(c["bbox"])} if isinstance(c, dict) else mv(c))
++                            for c in got[key]]
++        raw = _shift_raw(got, frame)
++    except RuntimeError:
++        raise
++    except Exception:  # noqa: BLE001 - a broken model must not stop the image path
++        raw = {}
++
++    # page lines -> deskewed crop coords
++    tlines = []
++    for i, ln in enumerate(doc.lines):
++        b = frame.box_to_crop(ln.bbox)
++        tlines.append(ts.TLine(text=ln.text, box=b, handwritten=bool(getattr(ln, "handwritten", False)), idx=i))
++
++    st = ts.detect(frame, tlines, raw)
++
++    # cells with ink but no text: read them, if there is a real recognizer
++    if rec is not None and not str(getattr(rec, "name", "")).startswith("mock"):
++        ink = ts._ink(frame.img)
++        todo = []
++        for c in st.cells:
++            if c.text:
++                continue
++            x0, y0, x1, y1 = [int(round(v)) for v in c.box]
++            inner = ink[y0 + 3:y1 - 2, x0 + 3:x1 - 2]
++            if inner.size and inner.mean() > 0.01:
++                todo.append(c)
++        if todo:
++            crops = [frame.img.crop(tuple(int(round(v)) for v in c.box)) for c in todo]
++            try:
++                res = rec.recognize(crops, lang_hint=lang_hint)
++                for c, (t, _conf) in zip(todo, res):
++                    c.text = (t or "").strip()
++            except Exception:  # noqa: BLE001
++                pass
+ 
+     cells: list[TableCell] = []
+-    for i, cr in enumerate(cells_raw):
+-        bbox = [int(v) for v in cr["bbox"]]
+-        cell_area = max(1, _area(bbox))
+-
+-        # Lines whose bboxes are mostly contained in this cell.
+-        contained = [
+-            ln for ln in doc.lines
+-            if _overlap(ln.bbox, bbox) >= 0.4 * _area(ln.bbox)
+-        ]
+-        contained.sort(key=lambda ln: (ln.bbox[1], ln.bbox[0]))
+-        text = " ".join(ln.text for ln in contained).strip()
+-
+-        is_header = bool(cr.get("is_header", cr["row"] < header_rows))
+-        handwritten = any(getattr(ln, "handwritten", False) for ln in contained)
+-
++    for i, c in enumerate(sorted(st.cells, key=lambda c: (c.row, c.col))):
++        q = frame.quad_to_page(c.box)
+         cells.append(TableCell(
+-            id=i,
+-            row=int(cr["row"]),
+-            col=int(cr["col"]),
+-            rowspan=int(cr.get("rowspan", 1)),
+-            colspan=int(cr.get("colspan", 1)),
+-            text=text,
+-            is_header=is_header,
+-            handwritten=handwritten,
+-            empty=(text == ""),
+-            bbox=bbox,
+-            quad=_quad_from_bbox(bbox),
++            id=i, row=c.row, col=c.col, rowspan=c.rowspan, colspan=c.colspan,
++            text=c.text, is_header=c.is_header, handwritten=c.handwritten,
++            empty=(c.text.strip() == ""), bbox=bbox_from_quad(q), quad=q,
+         ))
+ 
++    tq = frame.quad_to_page((st.xs[0], st.ys[0], st.xs[-1], st.ys[-1]))
+     return Table(
+-        bbox=bbox_from_quad(quad),
+-        quad=quad,
+-        num_rows=rows,
+-        num_cols=cols,
+-        header_rows=header_rows,
+-        ruling_style="full",
++        bbox=bbox_from_quad(tq),
++        quad=tq,
++        num_rows=len(st.ys) - 1,
++        num_cols=len(st.xs) - 1,
++        header_rows=st.header_rows,
++        ruling_style=st.ruling_style,
+         theme=None,
+         col_types=None,
+-        html="",
++        html=_html(cells),
+         reading_order=[c.id for c in cells],
+         cells=cells,
+-    )
+\ No newline at end of file
++    )
++
++
++def _html(cells: list[TableCell]) -> str:
++    import html as _h
++    rows: dict[int, list[TableCell]] = {}
++    for c in cells:
++        rows.setdefault(c.row, []).append(c)
++    out = ["<table>"]
++    for r in sorted(rows):
++        out.append("<tr>")
++        for c in sorted(rows[r], key=lambda c: c.col):
++            tag = "th" if c.is_header else "td"
++            attrs = (f' colspan="{c.colspan}"' if c.colspan > 1 else "") + (f' rowspan="{c.rowspan}"' if c.rowspan > 1 else "")
++            out.append(f"<{tag}{attrs}>{_h.escape(c.text, quote=False)}</{tag}>")
++        out.append("</tr>")
++    out.append("</table>")
++    return "".join(out)
+diff --git a/ocr/backend/app/pipeline/table_structure.py b/ocr/backend/app/pipeline/table_structure.py
+new file mode 100644
+index 0000000..74d724d
+--- /dev/null
++++ b/ocr/backend/app/pipeline/table_structure.py
+@@ -0,0 +1,724 @@
++"""Table structure from the page image + the page's text lines.
++
++Why this exists: the table adapters alone missed cells. Mock / tesseract /
++surya have no table model and returned a 2x2 placeholder grid; Paddle only
++returned HTML (no geometry), which the old code ignored -> 2x2 again; TATR
++was fed the whole page and dropped rows/columns it was unsure of. Every
++missed row or column became a missing ``<td>``.
++
++This module finds the grid itself, one axis at a time:
++
++  rows    : horizontal ruling lines   -> adapter rows   -> text-line rows
++  columns : vertical ruling lines     -> adapter cols   -> gaps between text
++
++The table region is deskewed first (angle from the quad, refined from the
++ink), so slightly rotated scans still give straight rows. Cell quads are
++rotated back, so they follow the page like the reference data does.
++
++Spans: in a ruled table a missing rule between two grid cells merges them
++(colspan / rowspan). Header rows: ``<th>`` from adapter HTML if it fits the
++grid, else the first row plus any row a first-row cell spans down into.
++
++Pure functions; numpy + Pillow only.
++"""
++from __future__ import annotations
++
++import math
++from dataclasses import dataclass, field
++from html.parser import HTMLParser
++from typing import Any, Optional, Sequence
++
++import numpy as np
++from PIL import Image
++
++Pt = tuple[float, float]
++
++
++# ---------------------------------------------------------------------------
++# Small geometry
++# ---------------------------------------------------------------------------
++
++def _quad_angle_deg(quad: Sequence[Sequence[float]]) -> float:
++    """Angle of the quad's top and bottom edges (image coords, y down)."""
++    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = [tuple(p) for p in quad]
++    a_top = math.degrees(math.atan2(y1 - y0, x1 - x0))
++    a_bot = math.degrees(math.atan2(y2 - y3, x2 - x3))
++    a = (a_top + a_bot) / 2
++    return a if abs(a) < 15 else 0.0
++
++
++@dataclass
++class Frame:
++    """Deskewed crop of the table and the mapping back to page coords."""
++    img: Image.Image          # deskewed crop, RGB
++    ox: float                 # crop origin on the page
++    oy: float
++    cx: float                 # rotation centre (crop coords)
++    cy: float
++    angle: float              # degrees the page was rotated to level the table
++    region: tuple[int, int, int, int]  # table extent inside the crop (x0,y0,x1,y1)
++
++    def to_page(self, x: float, y: float) -> Pt:
++        # undo the rotation (PIL rotates the content by `angle`, so points
++        # come back by rotating with the opposite sign about the same centre)
++        a = math.radians(self.angle)
++        dx, dy = x - self.cx, y - self.cy
++        px = self.cx + dx * math.cos(a) - dy * math.sin(a)
++        py = self.cy + dx * math.sin(a) + dy * math.cos(a)
++        return (px + self.ox, py + self.oy)
++
++    def to_crop(self, x: float, y: float) -> Pt:
++        a = math.radians(self.angle)
++        dx, dy = x - self.ox - self.cx, y - self.oy - self.cy
++        return (self.cx + dx * math.cos(a) + dy * math.sin(a),
++                self.cy - dx * math.sin(a) + dy * math.cos(a))
++
++    def quad_to_page(self, b: Sequence[float]) -> list[list[float]]:
++        x0, y0, x1, y1 = b
++        return [[round(v, 1) for v in self.to_page(x, y)]
++                for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
++
++    def box_to_crop(self, b: Sequence[float]) -> tuple[float, float, float, float]:
++        pts = [self.to_crop(x, y) for x, y in ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3]))]
++        xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
++        return (min(xs), min(ys), max(xs), max(ys))
++
++
++def _ink(img: Image.Image) -> np.ndarray:
++    """Boolean ink mask (Otsu threshold on grey)."""
++    g = np.asarray(img.convert("L"), dtype=np.uint8)
++    hist = np.bincount(g.ravel(), minlength=256).astype(np.float64)
++    total = g.size
++    if total == 0:
++        return np.zeros_like(g, dtype=bool)
++    w = np.cumsum(hist)
++    mu = np.cumsum(hist * np.arange(256))
++    mt = mu[-1]
++    with np.errstate(divide="ignore", invalid="ignore"):
++        between = (mt * w - mu * total) ** 2 / (w * (total - w))
++    between[~np.isfinite(between)] = 0
++    t = int(np.argmax(between))
++    t = min(t, 200)  # a near-blank crop must not turn paper grain into ink
++    return g <= t
++
++
++def _refine_angle(ink: np.ndarray, base: float) -> float:
++    """Extra rotation (degrees) that makes rows of ink sharpest.
++
++    Classic projection-profile deskew: the angle whose row sums have the
++    largest energy. Grey values are used (not re-thresholded) so thin rules
++    survive the downscale."""
++    h, w = ink.shape
++    if h < 10 or w < 10 or not ink.any():
++        return 0.0
++    small = Image.fromarray((ink * 255).astype(np.uint8))
++    scale = min(1.0, 800 / max(w, h))
++    if scale < 1:
++        small = small.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.BOX)
++
++    def score(d: float) -> float:
++        r = np.asarray(small.rotate(float(d), resample=Image.BILINEAR, fillcolor=0), dtype=np.float64)
++        prof = r.sum(axis=1)
++        return float((prof ** 2).sum())
++
++    coarse = max(np.arange(-2.0, 2.01, 0.25), key=score)
++    fine = max(np.arange(coarse - 0.2, coarse + 0.201, 0.05), key=score)
++    return float(round(fine, 3))
++
++
++def make_frame(page: Image.Image, quad: Sequence[Sequence[float]], margin: int = 8) -> Frame:
++    xs = [p[0] for p in quad]; ys = [p[1] for p in quad]
++    W, H = page.size
++    x0 = max(0, int(math.floor(min(xs))) - margin)
++    y0 = max(0, int(math.floor(min(ys))) - margin)
++    x1 = min(W, int(math.ceil(max(xs))) + margin)
++    y1 = min(H, int(math.ceil(max(ys))) + margin)
++    crop = page.convert("RGB").crop((x0, y0, x1, y1))
++    cx, cy = (x1 - x0) / 2, (y1 - y0) / 2
++
++    angle = _quad_angle_deg(quad)
++    # PIL.rotate(+a) turns the content counter-clockwise on screen; a table
++    # whose right side is higher (negative image angle) needs clockwise.
++    first = crop.rotate(angle, resample=Image.BICUBIC, center=(cx, cy), fillcolor=(255, 255, 255)) if abs(angle) > 0.05 else crop
++    extra = _refine_angle(_ink(first), angle)
++    total = angle + extra
++    img = crop.rotate(total, resample=Image.BICUBIC, center=(cx, cy), fillcolor=(255, 255, 255)) if abs(total) > 0.05 else crop
++
++    f = Frame(img=img, ox=x0, oy=y0, cx=cx, cy=cy, angle=total, region=(0, 0, img.width, img.height))
++    pts = [f.to_crop(px, py) for px, py in quad]
++    rx0 = max(0, int(round(min(p[0] for p in pts)))); ry0 = max(0, int(round(min(p[1] for p in pts))))
++    rx1 = min(img.width, int(round(max(p[0] for p in pts)))); ry1 = min(img.height, int(round(max(p[1] for p in pts))))
++    f.region = (rx0, ry0, max(rx0 + 1, rx1), max(ry0 + 1, ry1))
++    return f
++
++
++# ---------------------------------------------------------------------------
++# Ruling lines
++# ---------------------------------------------------------------------------
++
++def _close1d(mask: np.ndarray, axis: int, gap: int) -> np.ndarray:
++    """Fill gaps of up to `gap` px along `axis` (broken / dotted scan lines)."""
++    if gap <= 0:
++        return mask
++    # a pixel is filled when there is ink within `gap` px on BOTH sides
++    left = np.zeros_like(mask)
++    right = np.zeros_like(mask)
++    for t in range(1, gap + 1):
++        left |= np.roll(mask, t, axis=axis)
++        right |= np.roll(mask, -t, axis=axis)
++    return mask | (left & right)
++
++
++def _runs(v: np.ndarray, minlen: int) -> list[tuple[int, int]]:
++    """[start, end) of True runs at least `minlen` long."""
++    if not v.any():
++        return []
++    d = np.diff(np.concatenate(([0], v.astype(np.int8), [0])))
++    starts = np.flatnonzero(d == 1); ends = np.flatnonzero(d == -1)
++    keep = (ends - starts) >= minlen
++    return list(zip(starts[keep].tolist(), ends[keep].tolist()))
++
++
++@dataclass
++class Rule:
++    pos: float                 # y of a horizontal rule / x of a vertical one
++    segs: list[tuple[int, int]] = field(default_factory=list)  # covered extent along the rule
++
++    def covers(self, a: float, b: float, frac: float = 0.6) -> bool:
++        need = max(1.0, (b - a) * frac)
++        have = 0.0
++        for s, e in self.segs:
++            have += max(0.0, min(b, e) - max(a, s))
++        return have >= need
++
++
++def _group_rules(cands: dict[int, list[tuple[int, int]]], merge: int = 3) -> list[Rule]:
++    """Neighbouring pixel rows/cols (a 2-3 px thick rule) become one Rule."""
++    groups: list[list[int]] = []
++    for p in sorted(cands):
++        if groups and p - groups[-1][-1] <= merge:
++            groups[-1].append(p)
++        else:
++            groups.append([p])
++    out = []
++    for ps in groups:
++        segs = sorted(s for p in ps for s in cands[p])
++        merged: list[tuple[int, int]] = []
++        for s, e in segs:
++            if merged and s <= merged[-1][1] + 2:
++                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
++            else:
++                merged.append((s, e))
++        out.append(Rule(pos=(min(ps) + max(ps)) / 2, segs=merged))
++    return out
++
++
++def find_h_rules(ink: np.ndarray, region: tuple[int, int, int, int]) -> list[Rule]:
++    """Thin horizontal strokes much longer than a word.
++
++    A Devanagari headline (शिरोरेखा) is also a long horizontal stroke, so a
++    candidate must be thin AND have clear paper right above or right below
++    along most of its length (letters hang below a headline, never both).
++    """
++    x0, y0, x1, y1 = region
++    W = x1 - x0
++    # a rule that is a pixel off level (residual skew, aliasing steps) still
++    # reads as one run: look at y-1..y+1 together
++    m = _close1d(ink | np.roll(ink, 1, axis=0) | np.roll(ink, -1, axis=0), axis=1, gap=2)
++    minlen = max(30, int(0.12 * W))
++    cands: dict[int, list[tuple[int, int]]] = {}
++    H = ink.shape[0]
++    for y in range(max(0, y0 - 4), min(H, y1 + 5)):
++        segs = _runs(m[y, x0:x1], minlen)
++        good = []
++        for s, e in segs:
++            s += x0; e += x0
++            long_full = (e - s) >= 0.5 * W
++            # paper a few px above and below the stroke
++            above = ink[max(0, y - 6):max(0, y - 3), s:e]
++            below = ink[min(H, y + 4):min(H, y + 7), s:e]
++            fa = above.mean() if above.size else 0.0
++            fb = below.mean() if below.size else 0.0
++            if long_full and min(fa, fb) < 0.35:
++                good.append((s, e))
++            elif fa < 0.18 and fb < 0.18:
++                good.append((s, e))
++        if good:
++            cands[y] = good
++    return _group_rules(cands)
++
++
++def find_v_rules(ink: np.ndarray, region: tuple[int, int, int, int],
++                 bands: Optional[list[tuple[float, float]]] = None) -> list[Rule]:
++    """Vertical rules. With row bands known, a column rule must cross most of
++    a band's height (text strokes don't), else it must be long globally."""
++    x0, y0, x1, y1 = region
++    Hh = y1 - y0
++    m = _close1d(ink | np.roll(ink, 1, axis=1) | np.roll(ink, -1, axis=1), axis=0, gap=2)
++    cands: dict[int, list[tuple[int, int]]] = {}
++    Wimg = ink.shape[1]
++    for x in range(max(0, x0 - 4), min(Wimg, x1 + 5)):
++        col = m[:, x]
++        good: list[tuple[int, int]] = []
++        if bands:
++            for a, b in bands:
++                ia, ib = int(math.ceil(a)) + 2, int(math.floor(b)) - 2
++                if ib - ia < 4:
++                    continue
++                seg = col[ia:ib]
++                if seg.mean() >= 0.9:
++                    good.append((int(a), int(b)))
++        else:
++            for s, e in _runs(col[y0:y1], max(20, int(0.5 * Hh))):
++                good.append((s + y0, e + y0))
++        if good:
++            # thin-ness: paper on both sides
++            l = ink[y0:y1, max(0, x - 6):max(0, x - 3)]
++            r = ink[y0:y1, min(Wimg, x + 4):min(Wimg, x + 7)]
++            if (l.mean() if l.size else 0) < 0.5 or (r.mean() if r.size else 0) < 0.5:
++                cands[x] = good
++    return _group_rules(cands)
++
++
++# ---------------------------------------------------------------------------
++# Text-line helpers
++# ---------------------------------------------------------------------------
++
++@dataclass
++class TLine:
++    text: str
++    box: tuple[float, float, float, float]   # in crop (deskewed) coords
++    handwritten: bool = False
++    idx: int = -1
++
++
++def _rows_from_lines(lines: list[TLine]) -> list[tuple[float, float]]:
++    if not lines:
++        return []
++    hs = sorted(l.box[3] - l.box[1] for l in lines)
++    tol = max(4.0, hs[len(hs) // 2] * 0.5)
++    rows: list[list[TLine]] = []
++    for l in sorted(lines, key=lambda l: (l.box[1] + l.box[3]) / 2):
++        c = (l.box[1] + l.box[3]) / 2
++        if rows:
++            r = rows[-1]
++            rc = sum((x.box[1] + x.box[3]) / 2 for x in r) / len(r)
++            if abs(c - rc) <= tol:
++                r.append(l); continue
++        rows.append([l])
++    return [(min(x.box[1] for x in r), max(x.box[3] for x in r)) for r in rows]
++
++
++def _cols_from_lines(lines: list[TLine], x0: float, x1: float,
++                     row_bands: list[tuple[float, float]]) -> list[float]:
++    """Column separators = x ranges no (or almost no) row puts text in."""
++    if not lines or x1 - x0 < 4:
++        return []
++    n = int(math.ceil(x1 - x0)) + 1
++    cover = np.zeros(n, dtype=np.int32)
++    nrows = max(1, len(row_bands))
++    for a, b in row_bands or [(-1e9, 1e9)]:
++        occ = np.zeros(n, dtype=bool)
++        for l in lines:
++            cy = (l.box[1] + l.box[3]) / 2
++            if not (a - 1 <= cy <= b + 1):
++                continue
++            s = max(0, int(l.box[0] - x0)); e = min(n, int(math.ceil(l.box[2] - x0)))
++            occ[s:e] = True
++        cover += occ
++    allowed = max(0, int(0.1 * nrows))
++    free = cover <= allowed
++    seps: list[float] = []
++    for s, e in _runs(free, 8):
++        if s == 0 or e >= n:      # margins, not separators
++            continue
++        seps.append(x0 + (s + e) / 2)
++    return seps
++
++
++# ---------------------------------------------------------------------------
++# Adapter output -> boundaries
++# ---------------------------------------------------------------------------
++
++def _bounds_from_boxes(boxes: list[Sequence[float]], axis: int) -> list[float]:
++    """Separators between consecutive row (axis=1) / column (axis=0) boxes."""
++    if len(boxes) < 2:
++        return []
++    bs = sorted(boxes, key=lambda b: (b[axis] + b[axis + 2]) / 2)
++    out = []
++    for a, b in zip(bs, bs[1:]):
++        out.append((a[axis + 2] + b[axis]) / 2)
++    return out
++
++
++class _HtmlGrid(HTMLParser):
++    def __init__(self) -> None:
++        super().__init__()
++        self.rows: list[list[dict[str, Any]]] = []
++        self._cell: Optional[dict[str, Any]] = None
++
++    def handle_starttag(self, tag, attrs):
++        a = dict(attrs)
++        if tag == "tr":
++            self.rows.append([])
++        elif tag in ("td", "th"):
++            if not self.rows:
++                self.rows.append([])
++            self._cell = {
++                "th": tag == "th",
++                "colspan": max(1, int(a.get("colspan") or 1)),
++                "rowspan": max(1, int(a.get("rowspan") or 1)),
++                "text": "",
++            }
++            self.rows[-1].append(self._cell)
++
++    def handle_endtag(self, tag):
++        if tag in ("td", "th"):
++            self._cell = None
++
++    def handle_data(self, data):
++        if self._cell is not None:
++            self._cell["text"] += data
++
++
++def html_layout(html: str) -> Optional[dict[str, Any]]:
++    """Place HTML cells on a grid: [{row, col, rowspan, colspan, th, text}]."""
++    try:
++        p = _HtmlGrid(); p.feed(html)
++    except Exception:  # noqa: BLE001
++        return None
++    taken: set[tuple[int, int]] = set()
++    cells = []
++    ncols = 0
++    for r, row in enumerate(p.rows):
++        c = 0
++        for cell in row:
++            while (r, c) in taken:
++                c += 1
++            for dr in range(cell["rowspan"]):
++                for dc in range(cell["colspan"]):
++                    taken.add((r + dr, c + dc))
++            cells.append({**cell, "row": r, "col": c})
++            c += cell["colspan"]
++            ncols = max(ncols, c)
++    if not cells:
++        return None
++    nrows = max(r for r, _ in taken) + 1
++    return {"rows": nrows, "cols": ncols, "cells": cells}
++
++
++# ---------------------------------------------------------------------------
++# Main
++# ---------------------------------------------------------------------------
++
++@dataclass
++class Cell:
++    row: int
++    col: int
++    rowspan: int
++    colspan: int
++    box: tuple[float, float, float, float]   # crop coords
++    is_header: bool = False
++    text: str = ""
++    handwritten: bool = False
++    line_ids: list[int] = field(default_factory=list)
++
++
++@dataclass
++class Structure:
++    xs: list[float]
++    ys: list[float]
++    cells: list[Cell]
++    header_rows: int
++    ruling_style: str
++    source: str
++
++
++def _dedupe(vals: list[float], lo: float, hi: float, min_gap: float) -> list[float]:
++    out: list[float] = []
++    for v in sorted(vals):
++        if v <= lo + min_gap or v >= hi - min_gap:
++            continue
++        if out and v - out[-1] < min_gap:
++            out[-1] = (out[-1] + v) / 2
++        else:
++            out.append(v)
++    return out
++
++
++def detect(frame: Frame, lines: list[TLine], adapter_raw: Optional[dict[str, Any]] = None) -> Structure:
++    ink = _ink(frame.img)
++    rx0, ry0, rx1, ry1 = frame.region
++    W, H = rx1 - rx0, ry1 - ry0
++    raw = adapter_raw or {}
++
++    # ---- rows -------------------------------------------------------
++    h_rules = [r for r in find_h_rules(ink, frame.region)
++               if ry0 - 6 <= r.pos <= ry1 + 6 and sum(e - s for s, e in r.segs) >= 0.12 * W]
++    h_full = [r for r in h_rules if r.covers(rx0, rx1, 0.5)]
++    top = min([r.pos for r in h_full], default=ry0)
++    bot = max([r.pos for r in h_full], default=ry1)
++    # the table body is between the outermost full rules when there are some
++    ty0 = top if h_full and top - ry0 < 0.25 * H else ry0
++    ty1 = bot if h_full and ry1 - bot < 0.25 * H else ry1
++
++    lines_in = [l for l in lines
++                if rx0 - 2 <= (l.box[0] + l.box[2]) / 2 <= rx1 + 2
++                and ty0 - 2 <= (l.box[1] + l.box[3]) / 2 <= ty1 + 2]
++    med_h = sorted(l.box[3] - l.box[1] for l in lines_in)[len(lines_in) // 2] if lines_in else 20.0
++    min_row = max(6.0, 0.6 * med_h)
++
++    row_seps = _dedupe([r.pos for r in h_rules], ty0, ty1, min_row)
++    row_src = "rules"
++    if not row_seps:
++        rb = raw.get("row_boxes") or []
++        row_seps = _dedupe(_bounds_from_boxes(rb, 1), ty0, ty1, min_row) if rb else []
++        row_src = "model"
++    if not row_seps:
++        bands = _rows_from_lines(lines_in)
++        row_seps = _dedupe([(a[1] + b[0]) / 2 for a, b in zip(bands, bands[1:])], ty0, ty1, min_row)
++        row_src = "text"
++    ys = [ty0, *row_seps, ty1]
++    bands = list(zip(ys, ys[1:]))
++
++    # ---- columns ----------------------------------------------------
++    v_rules = find_v_rules(ink, frame.region, bands)
++    v_rules = [r for r in v_rules if rx0 - 6 <= r.pos <= rx1 + 6]
++    v_major = [r for r in v_rules
++               if sum(1 for a, b in bands if r.covers(a, b, 0.7)) >= max(1, int(0.3 * len(bands)))]
++    left = min([r.pos for r in v_major], default=rx0)
++    right = max([r.pos for r in v_major], default=rx1)
++    tx0 = left if v_major and left - rx0 < 0.2 * W else rx0
++    tx1 = right if v_major and rx1 - right < 0.2 * W else rx1
++
++    min_col = max(8.0, 0.8 * med_h)
++    col_seps = _dedupe([r.pos for r in v_rules], tx0, tx1, min_col)
++    col_src = "rules"
++    if not col_seps:
++        cb = raw.get("col_boxes") or []
++        col_seps = _dedupe(_bounds_from_boxes(cb, 0), tx0, tx1, min_col) if cb else []
++        col_src = "model"
++    if not col_seps:
++        col_seps = _dedupe(_cols_from_lines(lines_in, tx0, tx1, bands[1:] if len(bands) > 2 else bands), tx0, tx1, min_col)
++        col_src = "text"
++    xs = [tx0, *col_seps, tx1]
++
++    nr, nc = len(ys) - 1, len(xs) - 1
++
++    # ---- spans (only where the rules tell us) -----------------------
++    v_by_sep = {i: _nearest(v_rules, xs[i]) for i in range(1, nc)}
++    h_by_sep = {i: _nearest(h_rules, ys[i]) for i in range(1, nr)}
++    ruled = row_src == "rules" and col_src == "rules"
++
++    owner = [[(r, c) for c in range(nc)] for r in range(nr)]
++    spans: dict[tuple[int, int], list[int]] = {}
++
++    if ruled:
++        # colspans: no rule between (r,c) and (r,c+1)
++        for r in range(nr):
++            c = 0
++            while c < nc:
++                c2 = c
++                while c2 + 1 < nc:
++                    rule = v_by_sep.get(c2 + 1)
++                    if rule is not None and rule.covers(ys[r], ys[r + 1], 0.5):
++                        break
++                    c2 += 1
++                spans[(r, c)] = [1, c2 - c + 1]
++                for k in range(c + 1, c2 + 1):
++                    owner[r][k] = (r, c)
++                c = c2 + 1
++        # rowspans: same column run below and no rule between them
++        for r in range(nr - 1, -1, -1):
++            for c in range(nc):
++                if owner[r][c] != (r, c):
++                    continue
++                cs = spans[(r, c)][1]
++                r2 = r
++                while r2 + 1 < nr and owner[r2 + 1][c] == (r2 + 1, c) and spans.get((r2 + 1, c), [1, 0])[1] == cs:
++                    rule = h_by_sep.get(r2 + 1)
++                    if rule is not None and rule.covers(xs[c], xs[c + cs], 0.5):
++                        break
++                    r2 += 1
++                if r2 > r:
++                    # absorb rows r+1..r2 (they must not have absorbed others)
++                    total = 1
++                    for rr in range(r + 1, r2 + 1):
++                        total += spans.pop((rr, c), [1, cs])[0]
++                        for k in range(c, c + cs):
++                            owner[rr][k] = (r, c)
++                    spans[(r, c)][0] = total
++    else:
++        for r in range(nr):
++            for c in range(nc):
++                spans[(r, c)] = [1, 1]
++
++    # ---- adapter HTML: header cells / spans when it fits the grid ----
++    th_cells: set[tuple[int, int]] = set()
++    hl = html_layout(raw["html"]) if raw.get("html") else None
++    if hl and hl["rows"] == nr and hl["cols"] == nc:
++        if not ruled:
++            spans = {}
++            owner = [[(r, c) for c in range(nc)] for r in range(nr)]
++            for hc in hl["cells"]:
++                spans[(hc["row"], hc["col"])] = [hc["rowspan"], hc["colspan"]]
++                for dr in range(hc["rowspan"]):
++                    for dc in range(hc["colspan"]):
++                        if hc["row"] + dr < nr and hc["col"] + dc < nc:
++                            owner[hc["row"] + dr][hc["col"] + dc] = (hc["row"], hc["col"])
++        th_cells = {(hc["row"], hc["col"]) for hc in hl["cells"] if hc["th"]}
++
++    cells: list[Cell] = []
++    for (r, c), (rs, cs) in sorted(spans.items()):
++        rs = min(rs, nr - r); cs = min(cs, nc - c)
++        cells.append(Cell(row=r, col=c, rowspan=rs, colspan=cs,
++                          box=(xs[c], ys[r], xs[c + cs], ys[r + rs])))
++
++    # ---- header rows ------------------------------------------------
++    if th_cells:
++        hr = 0
++        for r in range(nr):
++            if all((cc.row, cc.col) in th_cells for cc in cells if cc.row == r):
++                hr = r + 1
++            else:
++                break
++    else:
++        hr = 1 if nr >= 2 else 0
++        if hr:
++            hr = max([cc.rowspan for cc in cells if cc.row == 0], default=1)
++            hr = min(hr, nr - 1) if nr > 1 else hr
++    for cc in cells:
++        cc.is_header = cc.row < hr or (cc.row, cc.col) in th_cells
++
++    # ---- ruling style -----------------------------------------------
++    has_h = bool(h_rules); has_v = bool(v_rules)
++    if has_h and has_v:
++        style = "full" if col_src == "rules" and row_src == "rules" and all(
++            v_by_sep.get(i) is not None for i in range(1, nc)) else "partial"
++    elif has_h:
++        style = "horizontal"
++    elif has_v:
++        style = "partial"
++    else:
++        style = "none"
++
++    _fill_text(cells, lines_in, ink, xs)
++    return Structure(xs=xs, ys=ys, cells=cells, header_rows=hr, ruling_style=style,
++                     source=f"rows:{row_src} cols:{col_src}")
++
++
++def _nearest(rules: list[Rule], pos: float, tol: float = 6.0) -> Optional[Rule]:
++    best = None
++    for r in rules:
++        if abs(r.pos - pos) <= tol and (best is None or abs(r.pos - pos) < abs(best.pos - pos)):
++            best = r
++    return best
++
++
++def _ov(a: Sequence[float], b: Sequence[float]) -> float:
++    w = min(a[2], b[2]) - max(a[0], b[0]); h = min(a[3], b[3]) - max(a[1], b[1])
++    return max(0.0, w) * max(0.0, h)
++
++
++def _word_slots(l: "TLine", ink: Optional[np.ndarray], seps: list[float]) -> list[float]:
++    """x centres of the ink 'words' inside a line box (rules masked out)."""
++    if ink is None:
++        return []
++    x0, y0, x1, y1 = [int(round(v)) for v in l.box]
++    h = max(1, y1 - y0)
++    ya, yb = y0 + int(0.15 * h), y1 - int(0.15 * h)
++    x0 = max(0, x0); x1 = min(ink.shape[1], x1)
++    if yb <= ya or x1 <= x0:
++        return []
++    prof = ink[max(0, ya):yb, x0:x1].any(axis=0)
++    for sx in seps:
++        k = int(round(sx)) - x0
++        prof[max(0, k - 3):max(0, k + 4)] = False
++    gap = max(2, int(0.3 * h))
++    runs = _runs(prof, 1)
++    clusters: list[list[int]] = []
++    for s_, e_ in runs:
++        if clusters and s_ - clusters[-1][1] <= gap:
++            clusters[-1][1] = e_
++        else:
++            clusters.append([s_, e_])
++    return [x0 + (s_ + e_) / 2 for s_, e_ in clusters if e_ - s_ >= 2]
++
++
++def _fill_text(cells: list[Cell], lines: list[TLine], ink: Optional[np.ndarray] = None,
++               col_xs: Optional[list[float]] = None) -> None:
++    """Every line goes to ONE cell (most overlap). A line that clearly runs
++    across several cells (page OCR read a whole row as one line) is split
++    word by word, using where the ink actually is, instead of being copied
++    into each cell."""
++    parts: dict[int, list[tuple[float, float, str, TLine]]] = {i: [] for i in range(len(cells))}
++    seps = list(col_xs or [])
++    for l in lines:
++        la = max(1.0, (l.box[2] - l.box[0]) * (l.box[3] - l.box[1]))
++        hits = [(i, _ov(l.box, c.box)) for i, c in enumerate(cells)]
++        hits = [(i, o) for i, o in hits if o > 0.05 * la]
++        if not hits:
++            continue
++        big = [i for i, o in hits if o >= 0.15 * la]
++        words = l.text.split()
++        cyy = (l.box[1] + l.box[3]) / 2
++
++        def cell_at(x: float) -> int:
++            inside = [i for i, _ in hits if cells[i].box[0] <= x <= cells[i].box[2]
++                      and cells[i].box[1] - 2 <= cyy <= cells[i].box[3] + 2]
++            return inside[0] if inside else max(hits, key=lambda t: t[1])[0]
++
++        if len(big) >= 2 and len(words) >= 2:
++            slots = _word_slots(l, ink, seps)
++            targets: list[tuple[int, float]] = []
++            if len(slots) == len(words):
++                targets = [(cell_at(x), x) for x in slots]
++            elif slots:
++                # fewer/more ink blobs than words: share the words between the
++                # cells that have ink, by how much ink each has
++                per: dict[int, list[float]] = {}
++                for x in slots:
++                    per.setdefault(cell_at(x), []).append(x)
++                order = sorted(per, key=lambda i: cells[i].box[0])
++                if len(order) <= len(words):
++                    weights = [len(per[i]) for i in order]
++                    tot = sum(weights)
++                    k = 0
++                    for j, i in enumerate(order):
++                        n = len(words) - k - (len(order) - j - 1) if j == len(order) - 1 else max(1, round(len(words) * weights[j] / tot))
++                        n = min(n, len(words) - k - (len(order) - j - 1))
++                        for w_ in range(n):
++                            targets.append((i, per[i][0] + w_))
++                        k += n
++            if len(targets) != len(words):
++                # no usable ink: spread words over the line by character count
++                total = sum(len(w) for w in words) + len(words) - 1
++                pos = 0
++                lw = l.box[2] - l.box[0]
++                targets = []
++                for w in words:
++                    cx = l.box[0] + lw * (pos + len(w) / 2) / max(1, total)
++                    pos += len(w) + 1
++                    targets.append((cell_at(cx), cx))
++            for w, (i, x) in zip(words, targets):
++                parts[i].append((l.box[1], x, w, l))
++        else:
++            i = max(hits, key=lambda t: t[1])[0]
++            parts[i].append((l.box[1], l.box[0], l.text, l))
++    for i, c in enumerate(cells):
++        ps = parts[i]
++        if not ps:
++            continue
++        # top-to-bottom rows of text, left-to-right inside a row
++        hs = sorted(p[3].box[3] - p[3].box[1] for p in ps)
++        tol = max(4.0, hs[len(hs) // 2] / 2)
++        ps.sort(key=lambda p: p[0])
++        rows: list[list[tuple[float, float, str, TLine]]] = []
++        for p in ps:
++            if rows and abs(p[0] - rows[-1][0][0]) <= tol:
++                rows[-1].append(p)
++            else:
++                rows.append([p])
++        c.text = " ".join(" ".join(p[2] for p in sorted(r, key=lambda p: p[1])) for r in rows).strip()
++        c.handwritten = any(p[3].handwritten for p in ps)
++        c.line_ids = sorted({p[3].idx for p in ps})
+diff --git a/ocr/backend/app/schemas/api.py b/ocr/backend/app/schemas/api.py
+index 6a7a603..1585484 100644
+--- a/ocr/backend/app/schemas/api.py
++++ b/ocr/backend/app/schemas/api.py
+@@ -99,7 +99,11 @@ class DocumentRead(BaseModel):
+ 
+ class AnnotationPut(BaseModel):
+     revision: int
+-    doc: Doc
++    # Raw editor JSON on purpose. Typing this as ``Doc`` made FastAPI reject
++    # the save (422) BEFORE ``annotations._clean_payload`` could fix it - a
++    # dragged box with a .5 coordinate or one leftover editor key was enough,
++    # and the toolbar showed nothing. The service cleans, then validates.
++    doc: dict[str, Any]
+ 
+ 
+ class AnnotationPatch(BaseModel):
+diff --git a/ocr/backend/app/schemas/doc_v2.py b/ocr/backend/app/schemas/doc_v2.py
+index 2c90602..97709db 100644
+--- a/ocr/backend/app/schemas/doc_v2.py
++++ b/ocr/backend/app/schemas/doc_v2.py
+@@ -419,9 +419,11 @@ class Line(_Schema):
+     font_size: float
+     font_id: Optional[int] = None
+     role: Optional[Literal["label", "value", "option"]] = None
+-    handwritten: Optional[bool] = None
++    # key order as in the reference pages: a handwritten table line is
++    # ..., "table_index", "cell_id", "handwritten", "quad"
+     table_index: Optional[int] = None
+     cell_id: Optional[int] = None
++    handwritten: Optional[bool] = None
+     list_level: Optional[int] = None
+     item_index: Optional[int] = None
+     quad: Quad
+diff --git a/ocr/backend/pyproject.toml b/ocr/backend/pyproject.toml
+index 097abfe..5f79441 100644
+--- a/ocr/backend/pyproject.toml
++++ b/ocr/backend/pyproject.toml
+@@ -17,6 +17,7 @@ dependencies = [
+     "psycopg[binary]",        # Postgres prod
+     "python-multipart",       # file uploads
+     "Pillow",                 # image size + PDF page rasterization
++    "numpy",                  # table grid detection (table_structure.py)
+     "pypdf",                  # PDF page count
+     "python-jose[cryptography]",  # JWT
+     "passlib[bcrypt]",
+diff --git a/ocr/backend/tests/test_table_structure.py b/ocr/backend/tests/test_table_structure.py
+new file mode 100644
+index 0000000..f9999de
+--- /dev/null
++++ b/ocr/backend/tests/test_table_structure.py
+@@ -0,0 +1,234 @@
++"""Table structure detection on drawn tables (no models needed).
++
++Run:  cd ocr/backend && python -m pytest tests/test_table_structure.py
++"""
++from __future__ import annotations
++
++import math
++from pathlib import Path
++
++import pytest
++from PIL import Image, ImageDraw, ImageFont
++
++from app.pipeline.adapters import mock
++from app.pipeline.table_ocr import recognize_table
++from app.pipeline.table_structure import html_layout
++from app.schemas.doc_v2 import Doc
++
++FONTS = [
++    "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf",
++    "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
++    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
++]
++
++
++def _font(size: int):
++    for f in FONTS:
++        if Path(f).exists():
++            return ImageFont.truetype(f, size)
++    return ImageFont.load_default()
++
++
++def _rot(p, c, deg):
++    a = math.radians(deg)
++    dx, dy = p[0] - c[0], p[1] - c[1]
++    return (c[0] + dx * math.cos(a) - dy * math.sin(a), c[1] + dx * math.sin(a) + dy * math.cos(a))
++
++
++def make_page(spec, *, rules="full", skew=0.0, row_lines=False, x0=100, y0=200,
++              col_w=(80, 260, 220), row_h=36, W=1000, H=900):
++    """spec: rows of cells; a cell is text or (text, rowspan, colspan).
++    Returns (image, doc dict, table quad, expected html)."""
++    # place the cells on the grid
++    nrows = len(spec)
++    ncols = len(col_w)
++    taken = set()
++    placed = []
++    for r, row in enumerate(spec):
++        c = 0
++        for cell in row:
++            text, rs, cs = (cell, 1, 1) if isinstance(cell, str) else cell
++            while (r, c) in taken:
++                c += 1
++            for dr in range(rs):
++                for dc in range(cs):
++                    taken.add((r + dr, c + dc))
++            placed.append((r, c, rs, cs, text))
++            c += cs
++    xs = [x0]
++    for w in col_w:
++        xs.append(xs[-1] + w)
++    ys = [y0 + i * row_h for i in range(nrows + 1)]
++    centre = ((xs[0] + xs[-1]) / 2, (ys[0] + ys[-1]) / 2)
++    R = lambda p: _rot(p, centre, skew)  # noqa: E731
++
++    img = Image.new("RGB", (W, H), "white")
++    dr = ImageDraw.Draw(img)
++    f = _font(int(row_h * 0.45))
++    lines = []
++
++    def text_at(x, y, t, hw=False):
++        # draw word-by-word along the skewed baseline
++        bw = dr.textlength(t, font=f)
++        p = R((x, y))
++        layer = Image.new("L", (int(bw) + 8, row_h), 0)
++        ImageDraw.Draw(layer).text((2, 2), t, font=f, fill=255)
++        layer = layer.rotate(-skew, expand=True, resample=Image.BICUBIC)
++        img.paste((20, 20, 20), (int(p[0]), int(p[1])), layer)
++        q = [R((x, y)), R((x + bw, y)), R((x + bw, y + row_h * 0.6)), R((x, y + row_h * 0.6))]
++        bx = [min(a[0] for a in q), min(a[1] for a in q), max(a[0] for a in q), max(a[1] for a in q)]
++        lines.append({
++            "text": t, "bbox": [math.floor(bx[0]), math.floor(bx[1]), math.ceil(bx[2]), math.ceil(bx[3])],
++            "block_id": 0, "line_in_block": len(lines), "is_heading": False, "font_size": 16.0,
++            "font_id": None, "quad": [[round(a[0], 1), round(a[1], 1)] for a in q],
++            **({"handwritten": True} if hw else {}),
++        })
++
++    for (r, c, rs, cs, t) in placed:
++        if t:
++            text_at(xs[c] + 6, ys[r] + (row_h * rs) / 2 - row_h * 0.3, t)
++    if row_lines:
++        # page OCR read each row as ONE line across the columns
++        merged = []
++        for r in range(nrows):
++            mine = [ln for ln in lines if ys[r] <= (ln["bbox"][1] + ln["bbox"][3]) / 2 < ys[r + 1]]
++            if not mine:
++                continue
++            mine.sort(key=lambda ln: ln["bbox"][0])
++            b = [min(l["bbox"][0] for l in mine), min(l["bbox"][1] for l in mine),
++                 max(l["bbox"][2] for l in mine), max(l["bbox"][3] for l in mine)]
++            merged.append({**mine[0], "text": " ".join(l["text"] for l in mine), "bbox": b,
++                           "quad": [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]})
++        lines[:] = merged
++
++    def seg(a, b):
++        dr.line([R(a), R(b)], fill=(0, 0, 0), width=2)
++
++    if rules in ("full", "horizontal"):
++        # horizontal rules, interrupted under row-spanning cells
++        for i, y in enumerate(ys):
++            for c in range(ncols):
++                spanned = any(r < i < r + rs and c0 <= c < c0 + cs for (r, c0, rs, cs, _) in placed)
++                if not spanned:
++                    seg((xs[c], y), (xs[c + 1], y))
++    if rules == "full":
++        for j, x in enumerate(xs):
++            for r in range(nrows):
++                spanned = any(c < j < c + cs and r0 <= r < r0 + rs for (r0, c, rs, cs, _) in placed)
++                if not spanned:
++                    seg((x, ys[r]), (x, ys[r + 1]))
++
++    quad = [list(R((xs[0], ys[0]))), list(R((xs[-1], ys[0]))), list(R((xs[-1], ys[-1]))), list(R((xs[0], ys[-1])))]
++    rows_html = {}
++    for (r, c, rs, cs, t) in sorted(placed):
++        tag = "th" if r == 0 else "td"
++        a = (f' colspan="{cs}"' if cs > 1 else "") + (f' rowspan="{rs}"' if rs > 1 else "")
++        rows_html.setdefault(r, []).append(f"<{tag}{a}>{t}</{tag}>")
++    html = "<table>" + "".join("<tr>" + "".join(rows_html.get(r, [])) + "</tr>" for r in range(nrows)) + "</table>"
++    doc = {
++        "v": 2, "image": "x.jpg", "width": W, "height": H, "document_id": "doc_test",
++        "page_number": 1, "page_count": 1, "language": "ne", "digit_style": "dev",
++        "doc_type": "other", "text": "", "fonts": [], "font_ids": [],
++        "layout": [], "blocks": [], "lines": lines, "tables": [], "ruling_lines": [],
++        "extra_regions": [],
++        "quality": {"is_grayscale": False, "is_binarized": False, "perspective": False,
++                    "is_clean": True, "has_stamp": False, "has_signature": False,
++                    "has_handwriting": False, "has_fold": False, "has_bleedthrough": False,
++                    "raw_lengths": {"paragraph_chars": 0, "list_items": 0, "form_fields": 0, "table_cells": 0}},
++        "annotation": {"source": "real", "tool": "t", "status": "in_progress"},
++    }
++    return img, Doc.model_validate(doc), quad, html
++
++
++BASIC = [
++    ["क्र.सं.", "निर्वाचन गराउन", "एउटा"],
++    ["१", "१७,६३९", "८२,५३९"],
++    ["२", "४६,७२६", "३३,९४०"],
++    ["३", "८५,७९५", "५२,५१५"],
++    ["४", "९४,१११", "९२,७२०"],
++    ["५", "७४,३२७", "७,१०६"],
++]
++
++
++def run(img, doc, quad, adapter=None):
++    return recognize_table(doc=doc, img=img, quad=quad, adapter=adapter or mock.MockTable())
++
++
++@pytest.mark.parametrize("skew", [0.0, 0.8, -1.2])
++def test_full_rules_every_td_found(skew):
++    img, doc, quad, html = make_page(BASIC, skew=skew)
++    t = run(img, doc, quad)
++    assert (t.num_rows, t.num_cols, len(t.cells)) == (6, 3, 18)
++    assert t.html == html
++    assert t.ruling_style == "full"
++
++
++def test_drawn_box_on_skewed_page():
++    """User drags an axis-aligned box around a slightly rotated table."""
++    img, doc, quad, html = make_page(BASIC, skew=1.0)
++    xs = [p[0] for p in quad]; ys = [p[1] for p in quad]
++    box = [[min(xs) - 4, min(ys) - 4], [max(xs) + 4, min(ys) - 4], [max(xs) + 4, max(ys) + 4], [min(xs) - 4, max(ys) + 4]]
++    t = run(img, doc, box)
++    assert (t.num_rows, t.num_cols) == (6, 3)
++    assert t.html == html
++
++
++def test_horizontal_rules_only():
++    img, doc, quad, html = make_page(BASIC, rules="horizontal")
++    t = run(img, doc, quad)
++    assert (t.num_rows, t.num_cols, len(t.cells)) == (6, 3, 18)
++    assert t.html == html
++    assert t.ruling_style == "horizontal"
++
++
++def test_borderless():
++    img, doc, quad, html = make_page(BASIC, rules="none")
++    t = run(img, doc, quad)
++    assert (t.num_rows, t.num_cols, len(t.cells)) == (6, 3, 18)
++    assert t.html == html
++    assert t.ruling_style == "none"
++
++
++def test_spans():
++    spec = [
++        ["क्र.सं.", ("विवरण", 1, 2)],
++        ["१", ("बाग्मती", 2, 1), "५१"],
++        ["२", "६२"],
++        ["३", "गण्डकी", "७३"],
++    ]
++    img, doc, quad, html = make_page(spec)
++    t = run(img, doc, quad)
++    assert (t.num_rows, t.num_cols) == (4, 3)
++    assert t.html == html
++
++
++def test_row_read_as_one_line_is_split_not_copied():
++    img, doc, quad, html = make_page(BASIC, row_lines=True)
++    t = run(img, doc, quad)
++    assert (t.num_rows, t.num_cols, len(t.cells)) == (6, 3, 18)
++    body = [c for c in t.cells if c.row == 1]
++    assert [c.text for c in sorted(body, key=lambda c: c.col)] == ["१", "१७,६३९", "८२,५३९"]
++
++
++def test_html_layout_spans():
++    hl = html_layout('<table><tr><th rowspan="2">a</th><th colspan="2">b</th></tr><tr><td>c</td><td>d</td></tr></table>')
++    assert hl["rows"] == 2 and hl["cols"] == 3
++    assert [(c["row"], c["col"]) for c in hl["cells"]] == [(0, 0), (0, 1), (1, 1), (1, 2)]
++
++
++class _HtmlOnlyAdapter:
++    """Paddle-style: HTML with <th>, no geometry."""
++    name = "html-only"
++
++    def __init__(self, html):
++        self.html = html
++
++    def recognize(self, img, quad):
++        return {"html": self.html, "rows": 0, "cols": 0, "cells": []}
++
++
++def test_model_html_header_rows_used_when_grid_matches():
++    img, doc, quad, _ = make_page(BASIC)
++    html = "<table>" + "<tr><th></th><th></th><th></th></tr>" * 2 + "<tr><td></td><td></td><td></td></tr>" * 4 + "</table>"
++    t = run(img, doc, quad, _HtmlOnlyAdapter(html))
++    assert t.header_rows == 2
+diff --git a/ocr/frontend/src/editor/PropertiesEditor.tsx b/ocr/frontend/src/editor/PropertiesEditor.tsx
+index ddef95a..1b4da25 100644
+--- a/ocr/frontend/src/editor/PropertiesEditor.tsx
++++ b/ocr/frontend/src/editor/PropertiesEditor.tsx
+@@ -242,6 +242,13 @@ function applyTypeChange(d: Doc, id: number, next: string) {
+     if (!target.list_style) target.list_style = "bullet";
+     syncListText(target, d);
+   }
++  if (next === "handwriting") {
++    if (target.subtype == null) target.subtype = "note";
++    target.handwritten = true;
++  } else if (prev === "handwriting") {
++    delete target.handwritten;
++    if (next !== "figure") delete target.subtype;
++  }
+   if (next === "signature" && target.signer == null) target.signer = "other";
+   if (next === "stamp" && target.stamp_text == null) target.stamp_text = "";
+   if (next === "logo") delete target.text;
+@@ -548,6 +555,23 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
+         </Section>
+       )}
+ 
++      {el.type === "handwriting" && (
++        <Section label="subtype">
++          <select
++            value={(el as any).subtype ?? "note"}
++            onChange={(e) => edit((d) => {
++              const t = d.layout.find((x) => x.id === el.id) as any;
++              if (t) { t.subtype = e.target.value; t.handwritten = true; }
++            })}
++            className="w-full rounded bg-slate-800 px-2 py-1 text-slate-100"
++          >
++            {["note", "annotation", "correction", "number", "date", "name", "other"].map((s) => (
++              <option key={s} value={s}>{s}</option>
++            ))}
++          </select>
++        </Section>
++      )}
++
+       {el.type === "signature" && (
+         <Section label="signer">
+           <select
+diff --git a/ocr/frontend/src/editor/commands.ts b/ocr/frontend/src/editor/commands.ts
+index 673cb78..42103ff 100644
+--- a/ocr/frontend/src/editor/commands.ts
++++ b/ocr/frontend/src/editor/commands.ts
+@@ -32,6 +32,10 @@ export function emptyLayout(type: string, bbox: BBox, id: number): LayoutElement
+     case "logo":      return { ...base, type: "logo" } as any;
+     case "signature": return { ...base, type: "signature", signer: "other", text: "" } as any;
+     case "stamp":     return { ...base, type: "stamp", stamp_text: "" };
++    // handwritten note / correction written on the page: same shape as the
++    // reference pages ("subtype": "note", "handwritten": true)
++    case "handwriting":
++      return { ...base, type: "handwriting", subtype: "note", handwritten: true } as any;
+     // any other type from /projects/:id/types (title, subheading,
+     // handwriting, …) is a plain text region of that type
+     default:          return { ...base, type: type as any } as any;
+diff --git a/ocr/frontend/src/editor/normalizeDoc.ts b/ocr/frontend/src/editor/normalizeDoc.ts
+index 77d4fbf..4e7413e 100644
+--- a/ocr/frontend/src/editor/normalizeDoc.ts
++++ b/ocr/frontend/src/editor/normalizeDoc.ts
+@@ -416,6 +416,10 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
+       el.text = "<figure/>";
+       el.subtype = el.subtype ?? "photo";
+     }
++    if (el.type === "handwriting") {
++      el.subtype = el.subtype ?? "note";
++      el.handwritten = true;
++    }
+     if (el.type === "list") {
+       let items = Array.isArray(el.items) ? el.items : [];
+       const parsed = !items.length && !!(el.text ?? "").trim();
+@@ -604,7 +608,12 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
+     if (use.length) {
+       for (const l of readingSort(use, (x) => x.bbox)) {
+         const { __fromTextLine, ...rest } = l;
+-        outLines.push({ ...rest, block_id: nid, is_heading: isHeading, text: isHeading ? stripHeadingPrefix(rest.text) : rest.text });
++        const out: any = { ...rest, block_id: nid, is_heading: isHeading, text: isHeading ? stripHeadingPrefix(rest.text) : rest.text };
++        if (el.handwritten && !out.handwritten) {
++          // lines of a handwritten region are handwritten (key before quad)
++          const { quad, ...front } = out;
++          outLines.push({ ...front, handwritten: true, quad });
++        } else outLines.push(out);
+       }
+       continue;
+     }
+@@ -614,7 +623,8 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
+       : isHeading ? stripHeadingPrefix(el.text ?? "") : (el.text ?? "");
+     const parts = text.split("\n").map((s: string) => s.trim()).filter(Boolean);
+     strips(el.bbox, parts.length).forEach((b, i) =>
+-      outLines.push(makeLine(parts[i], b, undefined, nid, isHeading, reuse(el.id, parts[i], b))));
++      outLines.push(makeLine(parts[i], b, undefined, nid, isHeading,
++        { ...reuse(el.id, parts[i], b), handwritten: !!el.handwritten })));
+   }
+   // line_in_block in order within each block
+   const counters = new Map<number, number>();
+diff --git a/ocr/frontend/src/editor/save.ts b/ocr/frontend/src/editor/save.ts
+new file mode 100644
+index 0000000..f0c2885
+--- /dev/null
++++ b/ocr/frontend/src/editor/save.ts
+@@ -0,0 +1,98 @@
++/**
++ * Save the open page — used by the Save button, Ctrl/⌘+S and "Submit".
++ *
++ * Before, a failed save threw inside the click handler: nothing was shown,
++ * the page stayed "dirty", and it looked like the tool would not save.
++ * Now every outcome is reported through `saveStatus` in the store:
++ *   409  the server has a newer revision (auto-annotate finished, another
++ *        tab saved) → ask, then overwrite with the server's revision number
++ *   422  the server could not read the page → the first problems are listed
++ *   else network / server error text
++ * Edits made while the request is in flight stay "unsaved".
++ */
++import { useStore } from "../store";
++
++type Detail = { where?: string; loc?: unknown[]; msg?: string; got?: unknown };
++
++function describe(body: string): string {
++  try {
++    const j = JSON.parse(body);
++    const d = j?.detail;
++    if (typeof d === "string") return d;
++    if (Array.isArray(d)) {
++      const parts = (d as Detail[]).slice(0, 4).map((x) => {
++        const where = x.where ?? (Array.isArray(x.loc) ? x.loc.slice(2).join(".") : "");
++        return `${where}: ${x.msg ?? ""}${x.got !== undefined ? ` (got ${JSON.stringify(x.got)})` : ""}`;
++      });
++      return parts.join("\n") + (d.length > 4 ? `\n… and ${d.length - 4} more` : "");
++    }
++  } catch {
++    /* not JSON */
++  }
++  return body.slice(0, 400) || "unknown error";
++}
++
++async function put(id: string, revision: number, doc: unknown) {
++  const r = await fetch(`/documents/${id}/annotation`, {
++    method: "PUT",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({ revision, doc }),
++  });
++  const text = await r.text();
++  return { status: r.status, text };
++}
++
++export async function saveCurrent(): Promise<boolean> {
++  const st = useStore.getState();
++  const doc = st.doc;
++  if (!doc) return false;
++  if (st.saveStatus.state === "saving") return false;
++  st.setSaveStatus({ state: "saving" });
++
++  try {
++    let res = await put(doc.document_id, st.revision, doc);
++
++    if (res.status === 409) {
++      // someone/something saved this page after we loaded it
++      const latest = await fetch(`/documents/${doc.document_id}`).then((r) => r.json()).catch(() => null);
++      const serverRev = latest?.revision;
++      const ok =
++        typeof serverRev === "number" &&
++        window.confirm(
++          `This page was changed on the server after you opened it ` +
++            `(server revision ${serverRev}, yours ${st.revision}).\n\n` +
++            `OK = overwrite it with what you see now\nCancel = keep editing (nothing is saved)`,
++        );
++      if (!ok) {
++        useStore.getState().setSaveStatus({
++          state: "error",
++          message: "Not saved: the server has a newer version of this page. Save again to overwrite it, or reload the page to take the server's version.",
++        });
++        return false;
++      }
++      res = await put(doc.document_id, serverRev, doc);
++    }
++
++    if (res.status < 200 || res.status >= 300) {
++      useStore.getState().setSaveStatus({
++        state: "error",
++        message: `Not saved (HTTP ${res.status}):\n${describe(res.text)}`,
++      });
++      return false;
++    }
++
++    const body = JSON.parse(res.text);
++    const now = useStore.getState();
++    if (now.doc === doc) {
++      now.markSaved(body.revision);
++    } else {
++      // edited while saving: keep those edits marked as unsaved
++      useStore.setState({ revision: body.revision, serverRevision: body.revision });
++    }
++    useStore.getState().setSaveStatus({ state: "saved", at: Date.now() });
++    return true;
++  } catch (e) {
++    useStore.getState().setSaveStatus({ state: "error", message: `Not saved: ${String(e)}` });
++    return false;
++  }
++}
+diff --git a/ocr/frontend/src/lib.ts b/ocr/frontend/src/lib.ts
+index 416c501..3a8ccf4 100644
+--- a/ocr/frontend/src/lib.ts
++++ b/ocr/frontend/src/lib.ts
+@@ -13,6 +13,7 @@ export const TYPE_COLORS: Record<LayoutType, string> = {
+   stamp: "#a16207",
+   footer: "#14b8a6",
+   signature_caption: "#f472b6",
++  handwriting: "#059669",
+ };
+ 
+ export const LAYER_KEYS = [
+diff --git a/ocr/frontend/src/panels/Right.tsx b/ocr/frontend/src/panels/Right.tsx
+index ac962b7..06cb811 100644
+--- a/ocr/frontend/src/panels/Right.tsx
++++ b/ocr/frontend/src/panels/Right.tsx
+@@ -279,9 +279,8 @@ function PageMetaPanel({ doc }: { doc: Doc }) {
+         <button
+           disabled={doc.doc_type === "other"}
+           onClick={async () => {
+-            const api = await import("../api");
+-            const res = await api.putAnnotation(doc.document_id, revision, doc);
+-            useStore.getState().markSaved(res.revision);
++            const { saveCurrent } = await import("../editor/save");
++            if (useStore.getState().dirty && !(await saveCurrent())) return;
+             await fetch(`/documents/${doc.document_id}/status`, {
+               method: "POST",
+               headers: { "Content-Type": "application/json" },
+diff --git a/ocr/frontend/src/panels/Toolbar.tsx b/ocr/frontend/src/panels/Toolbar.tsx
+index f0322ce..98052c5 100644
+--- a/ocr/frontend/src/panels/Toolbar.tsx
++++ b/ocr/frontend/src/panels/Toolbar.tsx
+@@ -1,3 +1,5 @@
++import { useEffect } from "react";
++import { saveCurrent } from "../editor/save";
+ import { useStore, type Tool } from "../store";
+ import { preannotate, getJob, getDocument } from "../api";
+ import { ModelPicker } from "../editor/ModelPicker";
+@@ -30,9 +32,7 @@ export function Toolbar() {
+   const tool = useStore((s) => s.tool);
+   const setTool = useStore((s) => s.setTool);
+   const doc = useStore((s) => s.doc);
+-  const revision = useStore((s) => s.revision);
+   const dirty = useStore((s) => s.dirty);
+-  const markSaved = useStore((s) => s.markSaved);
+   const undo = useStore((s) => s.undo);
+   const redo = useStore((s) => s.redo);
+   const nav = usePageNav(doc?.document_id ?? null);
+@@ -45,13 +45,28 @@ export function Toolbar() {
+   const drawType = useStore((s) => s.drawTypeDefault);
+   const types = useProjectTypes();
+ 
+-  async function save() {
+-    if (!doc) return;
+-    const res = await (await import("../api")).putAnnotation(
+-      doc.document_id, revision, doc,
+-    );
+-    markSaved(res.revision);
+-  }
++  const saveStatus = useStore((s) => s.saveStatus);
++  const setSaveStatus = useStore((s) => s.setSaveStatus);
++  const save = () => { void saveCurrent(); };
++
++  // Ctrl+S / ⌘+S saves (also while typing in a text box)
++  useEffect(() => {
++    const onKey = (e: KeyboardEvent) => {
++      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
++        e.preventDefault();
++        if (useStore.getState().dirty) void saveCurrent();
++      }
++    };
++    window.addEventListener("keydown", onKey);
++    return () => window.removeEventListener("keydown", onKey);
++  }, []);
++
++  // "Saved" fades after a few seconds
++  useEffect(() => {
++    if (saveStatus.state !== "saved") return;
++    const t = setTimeout(() => setSaveStatus({ state: "idle" }), 2500);
++    return () => clearTimeout(t);
++  }, [saveStatus, setSaveStatus]);
+ 
+   async function autoAnnotate() {
+     if (!doc) return;
+@@ -193,18 +208,39 @@ export function Toolbar() {
+         >
+           Redo
+         </button>
+-        <button
+-          onClick={save}
+-          disabled={!dirty}
+-          className={
+-            "rounded px-2 py-1 text-[11px] font-medium " +
+-            (dirty
+-              ? "bg-emerald-600 text-white hover:bg-emerald-500"
+-              : "bg-slate-800 text-slate-500")
+-          }
+-        >
+-          Save
+-        </button>
++        <div className="relative">
++          <button
++            onClick={save}
++            disabled={!dirty || saveStatus.state === "saving"}
++            className={
++              "rounded px-2 py-1 text-[11px] font-medium " +
++              (saveStatus.state === "error"
++                ? "bg-rose-600 text-white hover:bg-rose-500"
++                : dirty
++                  ? "bg-emerald-600 text-white hover:bg-emerald-500"
++                  : "bg-slate-800 text-slate-500")
++            }
++            title="Save (Ctrl+S)"
++          >
++            {saveStatus.state === "saving"
++              ? "Saving…"
++              : saveStatus.state === "saved" && !dirty
++                ? "Saved ✓"
++                : "Save"}
++          </button>
++          {saveStatus.state === "error" && (
++            <div className="absolute right-0 top-full z-50 mt-1 w-80 whitespace-pre-wrap rounded border border-rose-700 bg-rose-950 p-2 text-[11px] text-rose-100 shadow-lg">
++              <button
++                onClick={() => setSaveStatus({ state: "idle" })}
++                className="float-right ml-2 text-rose-300 hover:text-white"
++                title="Dismiss"
++              >
++                ✕
++              </button>
++              {saveStatus.message}
++            </div>
++          )}
++        </div>
+         <button
+           onClick={() => {
+             if (!doc) return;
+diff --git a/ocr/frontend/src/store.ts b/ocr/frontend/src/store.ts
+index 0cb5e14..9d6f3ee 100644
+--- a/ocr/frontend/src/store.ts
++++ b/ocr/frontend/src/store.ts
+@@ -30,6 +30,12 @@ export type Tool =
+   | "fingerprint"
+   | "reading-order";
+ 
++export type SaveStatus =
++  | { state: "idle" }
++  | { state: "saving" }
++  | { state: "saved"; at: number }
++  | { state: "error"; message: string };
++
+ export type RightTab =
+   | "properties"
+   | "tree"
+@@ -56,6 +62,8 @@ interface State {
+   undo: () => void;
+   redo: () => void;
+   markSaved: (revision: number) => void;
++  saveStatus: SaveStatus;
++  setSaveStatus: (s: SaveStatus) => void;
+ 
+   selection: Selection;
+   setSelection: (s: Selection) => void;
+@@ -119,6 +127,7 @@ export const useStore = create<State>((set, get) => ({
+       selection: null,
+       serverRevision: revision,
+       conflict: "none",
++      saveStatus: { state: "idle" },
+     }),
+ 
+   reloadIfClean: (doc, revision, imageUrl) => {
+@@ -178,6 +187,8 @@ export const useStore = create<State>((set, get) => ({
+ 
+   markSaved: (revision) =>
+     set({ revision, serverRevision: revision, dirty: false }),
++  saveStatus: { state: "idle" },
++  setSaveStatus: (saveStatus) => set({ saveStatus }),
+ 
+   selection: null,
+   setSelection: (selection) => set({ selection }),
+diff --git a/ocr/frontend/src/types.ts b/ocr/frontend/src/types.ts
+index 3b9eda0..1fbbf88 100644
+--- a/ocr/frontend/src/types.ts
++++ b/ocr/frontend/src/types.ts
+@@ -157,6 +157,18 @@ export interface StampLayout {
+   quad: Quad;
+ }
+ 
++/** Handwritten region (a note written next to a list item, …). */
++export interface HandwritingLayout {
++  id: number;
++  type: "handwriting";
++  bbox: BBox;
++  reading_order: number | null;
++  text: string;
++  subtype?: string;
++  handwritten?: boolean;
++  quad: Quad;
++}
++
+ export type LayoutElement = NestedIn & (
+   | HeaderLayout
+   | HeadingLayout
+@@ -169,7 +181,8 @@ export type LayoutElement = NestedIn & (
+   | FooterLayout
+   | LogoLayout
+   | SignatureLayout
+-  | StampLayout);
++  | StampLayout
++  | HandwritingLayout);
+ 
+ /** Set on a box that belongs to a list item (see ListItem.children). */
+ export interface NestedIn {
+-- 
+2.43.0
+
+
+From 333b659f04217d068752c9eb767500235b20fbe3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 15:38:54 -0700
+Subject: [PATCH 2/2] Commit frontend project files; fix unused variable
+
+- .gitignore: the global *.json / *.html rules hid package.json,
+  tsconfig.json and index.html, so a fresh clone could not build the
+  frontend. Re-include them; ignore tsconfig.tsbuildinfo.
+- Right.tsx: drop a variable left unused by the save refactor
+  (noUnusedLocals failed `pnpm build`).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DLvEwCHn5XK6jH4s6BTiCE
+---
+ .gitignore                        |  8 +++++++-
+ ocr/frontend/index.html           | 18 +++++++++++++++++
+ ocr/frontend/package.json         | 32 +++++++++++++++++++++++++++++++
+ ocr/frontend/src/panels/Right.tsx |  1 -
+ ocr/frontend/tsconfig.json        | 21 ++++++++++++++++++++
+ 5 files changed, 78 insertions(+), 2 deletions(-)
+ create mode 100644 ocr/frontend/index.html
+ create mode 100644 ocr/frontend/package.json
+ create mode 100644 ocr/frontend/tsconfig.json
+
+diff --git a/.gitignore b/.gitignore
+index ef47cff..5b49101 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -228,4 +228,10 @@ nepali_synth/
+ *.bak.*
+ *.tgz
+ *.ini
+-*.db
+\ No newline at end of file
++*.db
++# Frontend project files: the *.json / *.html rules above would hide them,
++# and without them a fresh clone of the frontend cannot install or build.
++!ocr/frontend/package.json
++!ocr/frontend/tsconfig.json
++!ocr/frontend/index.html
++ocr/frontend/tsconfig.tsbuildinfo
+diff --git a/ocr/frontend/index.html b/ocr/frontend/index.html
+new file mode 100644
+index 0000000..e236252
+--- /dev/null
++++ b/ocr/frontend/index.html
+@@ -0,0 +1,18 @@
++<!doctype html>
++<html lang="en">
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>DevaLabel</title>
++    <link rel="preconnect" href="https://fonts.googleapis.com" />
++    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
++    <link
++      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap"
++      rel="stylesheet"
++    />
++  </head>
++  <body class="font-deva antialiased">
++    <div id="root"></div>
++    <script type="module" src="/src/main.tsx"></script>
++  </body>
++</html>
+diff --git a/ocr/frontend/package.json b/ocr/frontend/package.json
+new file mode 100644
+index 0000000..a7f1a19
+--- /dev/null
++++ b/ocr/frontend/package.json
+@@ -0,0 +1,32 @@
++{
++  "name": "devalabel-frontend",
++  "private": true,
++  "version": "0.1.0",
++  "type": "module",
++  "scripts": {
++    "dev": "vite",
++    "build": "tsc -b && vite build",
++    "preview": "vite preview",
++    "lint": "tsc --noEmit"
++  },
++  "dependencies": {
++    "@tanstack/react-query": "^5.51.1",
++    "konva": "^9.3.14",
++    "react": "^18.3.1",
++    "react-dom": "^18.3.1",
++    "react-konva": "^18.2.10",
++    "immer": "^10.1.1",
++    "nanoid": "^5.0.7",
++    "zustand": "^4.5.4"
++  },
++  "devDependencies": {
++    "@types/react": "^18.3.3",
++    "@types/react-dom": "^18.3.0",
++    "@vitejs/plugin-react": "^4.3.1",
++    "autoprefixer": "^10.4.19",
++    "postcss": "^8.4.39",
++    "tailwindcss": "^3.4.6",
++    "typescript": "^5.5.3",
++    "vite": "^5.3.4"
++  }
++}
+diff --git a/ocr/frontend/src/panels/Right.tsx b/ocr/frontend/src/panels/Right.tsx
+index 06cb811..68f379b 100644
+--- a/ocr/frontend/src/panels/Right.tsx
++++ b/ocr/frontend/src/panels/Right.tsx
+@@ -261,7 +261,6 @@ function ReadingOrderPanel({ doc }: { doc: Doc }) {
+ // ---------------------------------------------------------------------------
+ 
+ function PageMetaPanel({ doc }: { doc: Doc }) {
+-  const revision = useStore((s) => s.revision);
+ 
+   return (
+     <div className="space-y-3 text-xs">
+diff --git a/ocr/frontend/tsconfig.json b/ocr/frontend/tsconfig.json
+new file mode 100644
+index 0000000..72c6495
+--- /dev/null
++++ b/ocr/frontend/tsconfig.json
+@@ -0,0 +1,21 @@
++{
++  "compilerOptions": {
++    "target": "ES2022",
++    "lib": ["ES2022", "DOM", "DOM.Iterable"],
++    "module": "ESNext",
++    "moduleResolution": "bundler",
++    "jsx": "react-jsx",
++    "strict": true,
++    "noUnusedLocals": true,
++    "noUnusedParameters": true,
++    "noFallthroughCasesInSwitch": true,
++    "esModuleInterop": true,
++    "skipLibCheck": true,
++    "resolveJsonModule": true,
++    "isolatedModules": true,
++    "allowImportingTsExtensions": false,
++    "noEmit": true,
++    "types": ["vite/client"]
++  },
++  "include": ["src"]
++}
+-- 
+2.43.0
+
