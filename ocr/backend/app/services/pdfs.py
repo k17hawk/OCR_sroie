@@ -22,9 +22,12 @@ def is_legacy_font(text: str) -> str | None:
 
 
 def iter_pdf_pages(
-    data: bytes, dpi: int
+    data: bytes, dpi: int, image_format: str = "JPEG",
 ) -> Iterator[tuple[int, bytes, str, str | None]]:
-    """Yield (page_number, jpeg_bytes, text_layer, legacy_font_name) per page.
+    """Yield (page_number, image_bytes, text_layer, legacy_font_name) per page.
+
+    image_format "PNG" gives lossless pages (written with fast compression;
+    the stored copy is re-compressed once).
 
     Uses pypdfium2 — pip-only, no system binaries. Output is JPEG: encoding
     a 300-DPI page as PNG is roughly 10× slower than JPEG and the visual
@@ -50,7 +53,10 @@ def iter_pdf_pages(
             pil_image = pil_image.convert("RGB")
 
         buf = BytesIO()
-        pil_image.save(buf, format="JPEG", quality=90, optimize=False)
+        if image_format.upper() == "PNG":
+            pil_image.save(buf, format="PNG", compress_level=1)
+        else:
+            pil_image.save(buf, format="JPEG", quality=90, optimize=False)
         jpeg_bytes = buf.getvalue()
 
         try:

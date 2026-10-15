@@ -1,7 +1,12 @@
 """File-backed document storage.
 
 Layout:
-    data/_db/documents/doc_0000001.json       -- the annotated Doc
+    <storage_root>/manual_annotation/pdf_001/pdf_001_page1.jsonl
+                                              -- the annotated Doc of an uploaded
+                                                 page (one JSON line); its image
+                                                 pdf_001_page1.png sits next to it
+    data/_db/documents/doc_0000001.json       -- the annotated Doc (documents
+                                                 created before per-file folders)
     data/_db/documents/doc_0000001.meta.json  -- sidecar metadata
     data/_db/counter.json                     -- next_document_number
     data/_db/audit.jsonl                      -- append-only log
@@ -21,7 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import logging
+
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
 from app.schemas.doc_v2 import Doc
 
 
@@ -43,6 +52,10 @@ class DocumentRow:
     source_filename: str | None = None
     text_layer: str | None = None
     legacy_font: str | None = None
+    # storage key of the page's .jsonl (manual_annotation/<name>/<name>_pageN.jsonl);
+    # None for documents stored the old way in _db/documents/
+    doc_key: str | None = None
+    source_stem: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -91,6 +104,31 @@ def _doc_path(document_id: str) -> Path:
     return _root() / "documents" / f"{document_id}.json"
 
 
+def key_path(key: str) -> Path:
+    """Absolute path of a storage key under storage_root."""
+    root = Path(get_settings().storage_root).resolve()
+    p = (root / key).resolve()
+    if root not in p.parents:
+        raise ValueError(f"path outside storage root: {key!r}")
+    return p
+
+
+def _row_doc_path(document_id: str, doc_key: str | None) -> Path:
+    return key_path(doc_key) if doc_key else _doc_path(document_id)
+
+
+def read_doc_file(path: Path) -> Doc:
+    """A page .jsonl holds one JSON line; a pretty-printed (hand-edited)
+    file is accepted too."""
+    text = path.read_text(encoding="utf-8").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        first = next((ln for ln in text.splitlines() if ln.strip()), "")
+        data = json.loads(first)
+    return Doc.model_validate(data)
+
+
 def _meta_path(document_id: str) -> Path:
     return _root() / "documents" / f"{document_id}.meta.json"
 
@@ -123,10 +161,14 @@ def _atomic_write(path: Path, data: str) -> None:
 def save(row: DocumentRow) -> None:
     row.updated_at = datetime.now(timezone.utc).isoformat()
 
-    _atomic_write(
-        _doc_path(row.document_id),
-        json.dumps(row.doc.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n",
-    )
+    doc_json = row.doc.model_dump(mode="json")
+    if row.doc_key:
+        # one line, so the page files can be concatenated into labels.jsonl
+        _atomic_write(key_path(row.doc_key),
+                      json.dumps(doc_json, ensure_ascii=False) + "\n")
+    else:
+        _atomic_write(_doc_path(row.document_id),
+                      json.dumps(doc_json, indent=2, ensure_ascii=False) + "\n")
 
     meta = {
         "document_id": row.document_id,
@@ -140,6 +182,8 @@ def save(row: DocumentRow) -> None:
         "source_filename": row.source_filename,
         "text_layer": row.text_layer,
         "legacy_font": row.legacy_font,
+        "doc_key": row.doc_key,
+        "source_stem": row.source_stem,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -150,14 +194,14 @@ def save(row: DocumentRow) -> None:
 
 
 def load(document_id: str) -> DocumentRow | None:
-    doc_file = _doc_path(document_id)
+    meta_file = _meta_path(document_id)
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+
+    doc_file = _row_doc_path(document_id, meta.get("doc_key"))
     if not doc_file.exists():
         return None
 
-    doc = Doc.model_validate(json.loads(doc_file.read_text(encoding="utf-8")))
-
-    meta_file = _meta_path(document_id)
-    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+    doc = read_doc_file(doc_file)
 
     # Auto-detect a hand-edit of the Doc file and bump revision so
     # optimistic locking stays honest.
@@ -178,6 +222,8 @@ def load(document_id: str) -> DocumentRow | None:
         source_filename=meta.get("source_filename"),
         text_layer=meta.get("text_layer"),
         legacy_font=meta.get("legacy_font"),
+        doc_key=meta.get("doc_key"),
+        source_stem=meta.get("source_stem"),
         created_at=meta.get("created_at", datetime.now(timezone.utc).isoformat()),
         updated_at=meta.get("updated_at", datetime.now(timezone.utc).isoformat()),
     )
@@ -189,9 +235,36 @@ def load(document_id: str) -> DocumentRow | None:
 
 
 def delete(document_id: str) -> None:
+    """Removes the document from the tool. A page stored in manual_annotation/
+    keeps its .jsonl and image on disk; uploading the file again brings it back."""
     for p in (_doc_path(document_id), _meta_path(document_id)):
         if p.exists():
             p.unlink()
+
+
+def rows_for_stem(project_id: int | None, stem: str) -> list[DocumentRow]:
+    """Pages created from the upload named <stem>, by page number.
+    project_id None searches every project."""
+    root = _root() / "documents"
+    out: list[DocumentRow] = []
+    for meta_path in root.glob("*.meta.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if meta.get("source_stem") != stem:
+            continue
+        if project_id is not None and int(meta.get("project_id", -1)) != project_id:
+            continue
+        try:
+            row = load(meta_path.name[: -len(".meta.json")])
+        except ValueError as e:
+            log.error("skipping %s: %s", meta_path.name, e)
+            continue
+        if row is not None:
+            out.append(row)
+    out.sort(key=lambda r: r.page_number)
+    return out
 
 
 def list_for_project(project_id: int) -> list[DocumentRow]:
@@ -205,7 +278,11 @@ def list_for_project(project_id: int) -> list[DocumentRow]:
             continue
         if int(meta.get("project_id", -1)) != project_id:
             continue
-        row = load(did)
+        try:
+            row = load(did)
+        except ValueError as e:      # a hand-edited .jsonl that no longer parses
+            log.error("skipping %s: %s", did, e)
+            continue
         if row is not None:
             out.append(row)
     out.sort(key=lambda r: r.doc_number)

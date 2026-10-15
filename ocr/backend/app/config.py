@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///./devalabel.db"
     storage_backend: str = "local"  # "local" | "s3"
     storage_root: Path = Path("./data")
+    # Uploaded PDFs/images are kept under <storage_root>/<annotation_dir>/<name>/
+    # as <name>_page<N>.png (or .jpg) next to <name>_page<N>.jsonl, the page's
+    # annotation. The .jsonl is what the editor loads and saves.
+    annotation_dir: str = "manual_annotation"
     s3_endpoint: str | None = None
     s3_bucket: str | None = None
     s3_access_key: str | None = None

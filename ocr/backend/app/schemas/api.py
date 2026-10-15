@@ -140,6 +140,7 @@ class FileResultRead(BaseModel):
     ok: bool
     error: str | None = None
     skipped_duplicate: bool = False
+    warning: str | None = None
     document_ids: list[str] = []
 
 

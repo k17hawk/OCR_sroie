@@ -41,7 +41,12 @@ export function DropZone({ projectId, onUploaded }: Props) {
         messages.push(`✗ ${f.filename}: ${f.error ?? "failed"}`);
       }
       for (const w of warnings) {
-        messages.push(`↷ ${w.filename}: already uploaded — opened the existing page`);
+        if (!w.warning) {
+          messages.push(`↷ ${w.filename}: already uploaded — opened the saved annotations`);
+        }
+      }
+      for (const r of res.results) {
+        if (r.ok && r.warning) messages.push(`⚠ ${r.warning}`);
       }
       setErrors(messages);
 

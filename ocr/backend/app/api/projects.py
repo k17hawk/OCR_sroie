@@ -162,6 +162,7 @@ async def upload_images(
                 ok=r.ok,
                 error=r.error,
                 skipped_duplicate=r.skipped_duplicate,
+                warning=r.warning,
                 document_ids=r.document_ids,
             ))
 

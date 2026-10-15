@@ -351,6 +351,7 @@ export interface FileResult {
   ok: boolean;
   error: string | null;
   skipped_duplicate: boolean;
+  warning?: string | null;
   document_ids: string[];
 }
 

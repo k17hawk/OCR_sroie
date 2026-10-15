@@ -77,6 +77,23 @@ def prepare_image(
     )
 
 
+def store_image_at(key_base: str, prepared: PreparedImage) -> str:
+    """Write the page image as <key_base>.<ext> and return its storage key,
+    e.g. manual_annotation/pdf_001/pdf_001_page1.png"""
+    storage = get_storage()
+    image_key = f"{key_base}.{prepared.save_ext}"
+    buf = BytesIO()
+    if prepared.save_ext == "jpg":
+        prepared.image.save(buf, format="JPEG", quality=92, optimize=True)
+        mime = "image/jpeg"
+    else:
+        # no optimize=True: on a 300-DPI page it multiplies the save time
+        prepared.image.save(buf, format="PNG", compress_level=6)
+        mime = "image/png"
+    storage.put(image_key, buf.getvalue(), content_type=mime)
+    return image_key
+
+
 def store_image(
     n: int, project_id: int, prepared: PreparedImage,
 ) -> str:
