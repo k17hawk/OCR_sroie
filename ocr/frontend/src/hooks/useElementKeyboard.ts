@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useStore, type Selection } from "../store";
-import type { Doc } from "../types";
+import type { BBox, Doc, Quad } from "../types";
 import { translateLayoutElement } from "../editor/commands";
 import { outerSelection, innerSelection } from "../editor/nesting";
 
@@ -106,9 +106,10 @@ function flatten(doc: Doc): Flat[] {
   for (const el of doc.layout) {
     out.push({ sel: { kind: "layout", id: el.id }, bbox: el.bbox });
     if (el.type === "form_field") {
-      el.fields.forEach((f, fi) =>
-        out.push({ sel: { kind: "field", elementId: el.id, fieldIndex: fi }, bbox: f.label.bbox }),
-      );
+      el.fields.forEach((f, fi) => {
+        const bbox = f.label?.bbox ?? f.value?.bbox;
+        if (bbox) out.push({ sel: { kind: "field", elementId: el.id, fieldIndex: fi }, bbox });
+      });
     }
   }
   doc.lines.forEach((ln, i) => out.push({ sel: { kind: "line", index: i }, bbox: ln.bbox }));
@@ -149,8 +150,8 @@ function nudge(d: Doc, sel: Exclude<Selection, null>, dx: number, dy: number) {
       if (el && el.type === "form_field") {
         const f = el.fields[sel.fieldIndex];
         if (!f) break;
-        shift(f.label);
-        if (f.value && "bbox" in f.value) shift(f.value);
+        if (f.label?.bbox) shift(f.label as { bbox: BBox; quad?: Quad });
+        if (f.value) shift(f.value);
       }
       break;
     }

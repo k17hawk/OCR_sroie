@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { produce, enableMapSet } from "immer";
-import type { Doc, Project } from "./types";
+import type { Doc, LoadWarning, Project } from "./types";
 import { LAYER_DEFAULTS, type LayerKey } from "./lib";
 
 enableMapSet();
@@ -86,6 +86,9 @@ interface State {
   markSaved: (revision: number) => void;
   saveStatus: SaveStatus;
   setSaveStatus: (s: SaveStatus) => void;
+  /** what the server changed to load this (older) page; shown until dismissed */
+  loadWarnings: LoadWarning[];
+  setLoadWarnings: (w: LoadWarning[]) => void;
 
   selection: Selection;
   setSelection: (s: Selection) => void;
@@ -213,6 +216,8 @@ export const useStore = create<State>((set, get) => ({
     set({ revision, serverRevision: revision, dirty: false }),
   saveStatus: { state: "idle" },
   setSaveStatus: (saveStatus) => set({ saveStatus }),
+  loadWarnings: [],
+  setLoadWarnings: (loadWarnings) => set({ loadWarnings }),
 
   selection: null,
   setSelection: (selection) => set({ selection }),

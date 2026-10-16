@@ -41,7 +41,7 @@ def import_jsonl(
             continue
         try:
             payload: dict[str, Any] = json.loads(raw)
-            doc = Doc.model_validate(payload)
+            doc, _ = doc_store.doc_from_record(payload)
         except (json.JSONDecodeError, ValidationError) as e:
             errors.append(f"line {lineno}: {e}")
             skipped += 1

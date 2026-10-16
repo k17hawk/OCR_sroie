@@ -3,7 +3,7 @@ export type BBox = [number, number, number, number];
 export type Quad = [Point, Point, Point, Point];
 
 export type Language = "ne" | "hi" | "en" | "mixed";
-export type DigitStyle = "devanagari" | "dev" | "latin" | "mixed";
+export type DigitStyle = "devanagari" | "dev" | "latin" | "mixed" | "none";
 
 export type AnnotationSource = "synthetic" | "real";
 export type AnnotationStatus =
@@ -14,37 +14,58 @@ export type AnnotationStatus =
   | "approved"
   | "rejected";
 
+export const FIELD_TYPES = [
+  "text", "name", "number", "date_bs", "date_ad", "checkbox", "photo", "signature_ref",
+] as const;
+
+/**
+ * The printed question of a field. Where it is: a label line of the region
+ * (`line_id`), a cell of the region's table (`cell_id`), another region
+ * (`region_id`, no bbox), or just a drawn `bbox`.
+ */
 export interface FormFieldLabel {
   text: string;
-  bbox: BBox;
-  quad: Quad;
+  bbox?: BBox;
+  quad?: Quad;
+  cell_id?: number;
+  region_id?: number;
+  line_id?: number;
 }
 
-export interface CheckboxOption {
-  text: string;
-  checked: boolean;
-  box_quad: Quad;
-  text_quad: Quad;
+/**
+ * One choice of a checkbox field. Its word is the line `line_id` (role
+ * "option"). Tick area: a printed square (`box`) or a separate tick cell
+ * (`tick_cell_id`), or neither.
+ */
+export interface FieldOption {
+  line_id: number;
+  checked: boolean | null;
+  box?: BBox;
+  box_quad?: Quad;
+  tick_cell_id?: number;
 }
 
+/** Where the answer goes, and what is written there. `empty` = text === "". */
 export interface NormalFieldValue {
   text: string;
   bbox: BBox;
   quad: Quad;
   handwritten: boolean;
+  empty: boolean;
+  cell_id?: number;
 }
 
-export interface CheckboxFieldValue {
-  text: string;
-  options: CheckboxOption[];
-}
+export type FieldValue = NormalFieldValue;
 
-export type FieldValue = NormalFieldValue | CheckboxFieldValue;
-
+/** A question of a form_field, table or list region. Checkbox fields keep
+ *  `value` null; the answer is `options[].checked`. `label` may be null only
+ *  for a checkbox field. */
 export interface FormFieldEntry {
-  label: FormFieldLabel;
+  label: FormFieldLabel | null;
   field_type: string;
+  single_choice?: boolean;
   value: FieldValue | null;
+  options?: FieldOption[];
 }
 
 export interface ListItem {
@@ -97,6 +118,7 @@ export interface TableLayout {
   reading_order: number | null;
   text: string;
   table_index: number;
+  fields?: FormFieldEntry[];
   quad: Quad;
 }
 export interface ListLayout {
@@ -107,6 +129,7 @@ export interface ListLayout {
   text: string;
   list_style: string;
   items: ListItem[];
+  fields?: FormFieldEntry[];
   quad: Quad;
 }
 export interface ParagraphLayout {
@@ -117,9 +140,10 @@ export interface ParagraphLayout {
   text: string;
   quad: Quad;
 }
-export interface SignatureCaptionLayout {
+/** title, subheading, table_heading, caption: text-only regions. */
+export interface TextRegionLayout {
   id: number;
-  type: "signature_caption";
+  type: "title" | "subheading" | "table_heading" | "caption";
   bbox: BBox;
   reading_order: number | null;
   text: string;
@@ -177,7 +201,7 @@ export type LayoutElement = NestedIn & (
   | TableLayout
   | ListLayout
   | ParagraphLayout
-  | SignatureCaptionLayout
+  | TextRegionLayout
   | FooterLayout
   | LogoLayout
   | SignatureLayout
@@ -203,6 +227,8 @@ export interface Block {
 export type LineRole = "label" | "value" | "option";
 
 export interface Line {
+  /** stable per page, never reused (see Doc.next_line_id) */
+  id?: number;
   text: string;
   bbox: BBox;
   block_id: number;
@@ -333,6 +359,16 @@ export interface Doc {
   extra_regions: ExtraRegion[];
   quality: Quality;
   annotation: Annotation;
+  /** the id the next new line gets */
+  next_line_id?: number;
+}
+
+/** What the server changed to load an older page file (mapped region
+ *  types, converted checkbox shapes, …). */
+export interface LoadWarning {
+  level: "info" | "warning" | "error";
+  path: string;
+  message: string;
 }
 
 export interface Job {

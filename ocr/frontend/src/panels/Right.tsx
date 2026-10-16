@@ -140,10 +140,10 @@ function Children({ el, doc }: { el: LayoutElement; doc: Doc }) {
                 setSelection({ kind: "field", elementId: el.id, fieldIndex: i })
               }
               className="w-full truncate rounded px-2 py-0.5 text-left text-[11px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-              title={`${f.label.text} — ${f.value?.text ?? "null"}`}
+              title={`${f.label?.text ?? "(no question)"} — ${f.value?.text ?? "null"}`}
             >
               <span className="font-mono text-slate-500">{f.field_type}:</span>{" "}
-              {f.label.text} {f.value ? `→ ${f.value.text}` : ""}
+              {f.label?.text ?? "(no question)"} {f.value ? `→ ${f.value.text}` : ""}
             </button>
           </li>
         ))}

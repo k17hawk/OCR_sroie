@@ -91,6 +91,8 @@ class DocumentRead(BaseModel):
     image_url: str
     source_file_id: str | None = None
     doc: Doc
+    # what was changed to load an older file (mapped region types, …)
+    warnings: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

@@ -38,10 +38,11 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.finalize import finalize
 from app.schemas.doc_v2 import (
-    Annotation, Block, CheckboxFieldValue, CheckboxOption, Doc, ExtraRegion,
+    Annotation, Block, Doc, ExtraRegion, FieldOption,
     FormFieldEntry, FormFieldLabel, LayoutElement, Line, ListItem,
     NormalFieldValue, Quality, RawLengths, RulingLine, Table, TableCell,
 )
+from app.core.migrate import migrate
 from app.services.geometry import ensure_quads
 from app.services.projects import Project
 from app.storage import doc_store
@@ -122,19 +123,17 @@ def _clean_form_field(f: Any) -> Any:
     f = _keep(f, FormFieldEntry)
     if not isinstance(f, dict):
         return f
-    f["label"] = _keep(f.get("label") or {}, FormFieldLabel)
+    lab = f.get("label")
+    f["label"] = _keep(lab, FormFieldLabel) if isinstance(lab, dict) else None
     f.setdefault("field_type", "text")
     v = f.get("value")
     if isinstance(v, dict):
-        if "options" in v:
-            v = _keep(v, CheckboxFieldValue)
-            v["options"] = [_keep(o, CheckboxOption) for o in v.get("options") or []]
-            v.setdefault("text", "")
-        else:
-            v = _keep(v, NormalFieldValue)
-            v.setdefault("text", "")
-            v["handwritten"] = bool(v.get("handwritten", False))
+        v = _keep(v, NormalFieldValue)
+        v.setdefault("text", "")
+        v["handwritten"] = bool(v.get("handwritten", False))
         f["value"] = v
+    if isinstance(f.get("options"), list):
+        f["options"] = [_keep(o, FieldOption) for o in f["options"] if isinstance(o, dict)]
     return f
 
 
@@ -162,7 +161,7 @@ def _clean_layout_element(el: dict[str, Any]) -> dict[str, Any]:
         ]
         for i in out["items"]:
             i.setdefault("marker", ""); i.setdefault("text", "")
-    if t == "form_field":
+    if t == "form_field" or (t in ("table", "list") and isinstance(out.get("fields"), list)):
         out["fields"] = [_clean_form_field(f) for f in out.get("fields") or []]
     return out
 
@@ -218,7 +217,8 @@ def _clean_table(t: Any) -> Any:
 # stored - and dropped as empty. Fill it from the boxes it contains.
 # ---------------------------------------------------------------------------
 
-LIST_CHILD_TYPES = {"text_line", "list_item"}
+# (text_line / list_item boxes are loaded as paragraphs now; see core/migrate.py)
+LIST_CHILD_TYPES = {"paragraph"}
 _MARKER_RE = re.compile(
     r"^\s*((?:[०-९]+|[0-9]+)[.)]|\(?[क-ह]\)|\([०-९0-9]+\)|[a-zA-Z][.)]"
     r"|(?:[ivxlcdm]+|[IVXLCDM]+)[.)]|[-•*●▪◦–])\s+(.*)$",
@@ -289,7 +289,8 @@ def _fill_lists_from_children(layout: list[dict[str, Any]]) -> None:
 
 def _clean_payload(payload: dict[str, Any], row: doc_store.DocumentRow) -> dict[str, Any]:
     """Return a copy of the editor payload that the Doc schema accepts."""
-    p = json.loads(json.dumps(payload))
+    # an editor that loaded an old page may still send old shapes
+    p, _ = migrate(json.loads(json.dumps(payload)))
     server = row.doc.model_dump(mode="json")
 
     # Fields the client may not change: always the server's values.
@@ -300,7 +301,7 @@ def _clean_payload(payload: dict[str, Any], row: doc_store.DocumentRow) -> dict[
 
     # Required page-level fields the editor may have dropped: keep the server's.
     for k in ("page_number", "page_count", "language", "digit_style", "doc_type",
-              "text", "quality", "annotation"):
+              "text", "quality", "annotation", "next_line_id"):
         if p.get(k) is None:
             p[k] = server.get(k)
 

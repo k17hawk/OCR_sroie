@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from app.core.geometry import bbox_from_quad
 from app.core.serialize import (
-    serialize_checkbox_value,
     serialize_form_field,
     serialize_list,
     serialize_table_html,
@@ -23,7 +22,6 @@ from app.core.serialize import (
 from app.schemas.doc_v2 import (
     Block,
     CheckboxExtraRegion,
-    CheckboxFieldValue,
     Doc,
     FigureLayout,
     FormFieldLayout,
@@ -122,6 +120,11 @@ def finalize(doc: Doc) -> Doc:
         lines_by_block.setdefault(line.block_id, []).append(line)
     for bucket in lines_by_block.values():
         bucket.sort(key=lambda ln: ln.line_in_block)
+    lines_by_id: dict[int, Line] = {ln.id: ln for ln in doc.lines if ln.id is not None}
+
+    def _line_text(line_id: int) -> str | None:
+        ln = lines_by_id.get(line_id)
+        return ln.text.strip() if ln is not None else None
 
     # ------------------------------------------------------------------
     # 1) Recompute bbox + text on every layout element.
@@ -146,11 +149,7 @@ def finalize(doc: Doc) -> Doc:
             el.text = "<figure/>"
 
         elif isinstance(el, FormFieldLayout):
-            for field in el.fields:
-                value = field.value
-                if isinstance(value, CheckboxFieldValue):
-                    value.text = serialize_checkbox_value(value.options)
-            el.text = serialize_form_field(el.fields)
+            el.text = serialize_form_field(el.fields, _line_text)
 
         elif isinstance(el, ListLayout):
             pass  # after the loop: needs its children's final text
@@ -229,21 +228,19 @@ def finalize(doc: Doc) -> Doc:
     # ------------------------------------------------------------------
     # 4) Recompute extra_regions: derived checkboxes first, then the rest.
     # ------------------------------------------------------------------
+    # (one per option with a printed square; checked null is written false)
     derived_checkboxes: list[CheckboxExtraRegion] = []
     for el in doc.layout:
-        if not isinstance(el, FormFieldLayout):
-            continue
-        for field in el.fields:
-            value = field.value
-            if not isinstance(value, CheckboxFieldValue):
-                continue
-            for opt in value.options:
+        for field in getattr(el, "fields", None) or []:
+            for opt in field.options or []:
+                if opt.box is None or opt.box_quad is None:
+                    continue
                 derived_checkboxes.append(
                     CheckboxExtraRegion(
                         type="checkbox",
-                        checked=opt.checked,
-                        option=opt.text,
-                        bbox=bbox_from_quad(opt.box_quad),
+                        checked=bool(opt.checked),
+                        option=_line_text(opt.line_id) or "",
+                        bbox=opt.box,
                         quad=opt.box_quad,
                     )
                 )

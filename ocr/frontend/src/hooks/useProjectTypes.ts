@@ -27,13 +27,11 @@ export const FALLBACK_TYPES: ProjectTypes = {
     "district", "municipality", "ward", "address", "phone", "email",
     "money", "account_number", "number", "signature_ref", "other",
   ],
+  // the region types of the v2 schema (older names are mapped on load)
   layout_types: [
-    "header", "title", "heading", "subheading", "paragraph", "text_line",
-    "footer", "page_number", "signature_caption", "figure", "table",
-    "table_heading", "table_footer", "list", "list_item", "form_field",
-    "form_label", "form_value", "label", "options", "logo", "signature",
-    "stamp", "handwriting", "handwritten_annotation",
-    "handwritten_correction", "handwritten_number", "mixed_text",
+    "title", "heading", "subheading", "paragraph", "list", "form_field",
+    "table", "table_heading", "header", "footer", "figure", "logo", "stamp",
+    "signature", "handwriting", "caption",
   ],
 };
 
@@ -75,11 +73,8 @@ export function prettyType(t: string): string {
 
 // Types that carry plain text and are drawn/edited like a paragraph.
 export const TEXT_LIKE_TYPES = new Set([
-  "header", "title", "heading", "subheading", "paragraph", "text_line",
-  "footer", "page_number", "signature_caption", "table_heading",
-  "table_footer", "list_item", "form_label", "form_value", "label",
-  "handwriting", "handwritten_annotation", "handwritten_correction",
-  "handwritten_number", "mixed_text",
+  "header", "title", "heading", "subheading", "paragraph",
+  "footer", "caption", "table_heading", "handwriting",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -122,7 +117,7 @@ export const BOLD_COLORS: Record<string, string> = {
   figure: "#16a34a",
   logo: "#65a30d",
   signature: "#be185d",
-  signature_caption: "#db2777",
+  caption: "#db2777",
   stamp: "#9f1239",
   // handwriting
   handwriting: "#059669",

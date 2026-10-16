@@ -25,8 +25,8 @@ import numpy as np
 from app.services.geometry import bbox_to_quad
 
 TEXT_TYPES = frozenset({
-    "paragraph", "header", "title", "heading", "subheading", "list", "list_item",
-    "form_field", "table_heading", "footer", "page_number",
+    "paragraph", "header", "title", "heading", "subheading", "list",
+    "form_field", "table_heading", "footer", "caption",
 })
 
 # keys of an old line worth carrying over to the new line at the same index

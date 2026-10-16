@@ -172,3 +172,39 @@ def test_build_labels_and_export_paths(client, monkeypatch):
     names = set(zf.namelist())
     recs = [json.loads(l) for l in zf.read("labels.jsonl").decode().splitlines()]
     assert len(recs) == 3 and all(r["image"] in names for r in recs)
+
+
+def test_old_page_file_loads_with_mapping_warnings_and_saves_new_form(client):
+    """An old .jsonl (text_line region, checkbox value with options) opens,
+    the API lists what was mapped, and saving stores the current shape."""
+    pid = _project(client)
+    ids = _upload(client, pid, "pdf_001.pdf", _pdf(1))["document_ids"]
+    _, jl = _page(client, "pdf_001", 1)
+    d = json.loads(jl.read_text())
+    q = lambda b: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]
+    d["layout"] = [
+        {"id": 1, "type": "text_line", "bbox": [10, 10, 200, 40], "reading_order": 0,
+         "text": "वडा नं. १", "quad": q([10, 10, 200, 40])},
+        {"id": 2, "type": "form_field", "bbox": [10, 50, 400, 90], "reading_order": 1, "text": "",
+         "quad": q([10, 50, 400, 90]), "fields": [{
+             "label": {"text": "लिङ्ग:", "bbox": [10, 50, 100, 90], "quad": q([10, 50, 100, 90])},
+             "field_type": "checkbox",
+             "value": {"text": "[ ] पुरुष", "options": [{"text": "पुरुष", "checked": False,
+                                                          "box_quad": q([180, 60, 200, 80]),
+                                                          "text_quad": q([120, 55, 175, 85])}]}}]},
+    ]
+    import time
+    time.sleep(1.1)
+    jl.write_text(json.dumps(d, ensure_ascii=False))
+    got = client.get(f"/documents/{ids[0]}").json()
+    assert any("text_line" in w["message"] and "paragraph" in w["message"] for w in got["warnings"])
+    assert [el["type"] for el in got["doc"]["layout"]] == ["paragraph", "form_field"]
+    f = got["doc"]["layout"][1]["fields"][0]
+    assert f["value"] is None and f["options"][0]["box"] == [180, 60, 200, 80]
+
+    r = client.put(f"/documents/{ids[0]}/annotation", json={"doc": got["doc"], "revision": got["revision"]})
+    assert r.status_code == 200, r.text
+    stored = json.loads(jl.read_text())
+    assert stored["layout"][0]["type"] == "paragraph"
+    assert "text_line" not in jl.read_text()
+    assert client.get(f"/documents/{ids[0]}").json()["warnings"] == []

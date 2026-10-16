@@ -51,10 +51,10 @@ function Shell() {
     queryFn: async () => {
       if (documentId) {
         const r = await getDocument(documentId);
-        return { doc: r.doc, revision: r.revision, image_url: r.image_url };
+        return { doc: r.doc, revision: r.revision, image_url: r.image_url, warnings: r.warnings };
       }
       const doc = await fetchSample();
-      return { doc, revision: 1, image_url: null as string | null };
+      return { doc, revision: 1, image_url: null as string | null, warnings: [] };
     },
     // Poll only when a real document is loaded.
     refetchInterval: documentId ? 3000 : false,
@@ -67,6 +67,7 @@ function Shell() {
       const s = useStore.getState();
       if (!s.doc || s.doc.document_id !== data.doc.document_id) {
         load(data.doc, data.revision, data.image_url);
+        s.setLoadWarnings(data.warnings.filter((w) => w.level !== "info"));
         setTimeout(() => requestFit(), 50);
       }
     }

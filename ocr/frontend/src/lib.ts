@@ -2,8 +2,11 @@ import type { LayoutType } from "./types";
 
 export const TYPE_COLORS: Record<LayoutType, string> = {
   header: "#3b82f6",
+  title: "#c026d3",
   heading: "#8b5cf6",
+  subheading: "#7c3aed",
   paragraph: "#10b981",
+  table_heading: "#f97316",
   figure: "#f97316",
   form_field: "#06b6d4",
   table: "#ef4444",
@@ -12,7 +15,7 @@ export const TYPE_COLORS: Record<LayoutType, string> = {
   signature: "#ec4899",
   stamp: "#a16207",
   footer: "#14b8a6",
-  signature_caption: "#f472b6",
+  caption: "#f472b6",
   handwriting: "#059669",
 };
 

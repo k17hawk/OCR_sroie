@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import type {
-  Doc, LayoutElement, FormFieldEntry, CheckboxOption, BBox,
+  Doc, LayoutElement, FormFieldEntry, FieldOption, BBox,
 } from "../types";
 import {
   useProjectTypes, withCurrent, prettyType, typeColor,
@@ -808,10 +808,13 @@ function FormFieldEditor({ el }: { el: any }) {
             <div className="space-y-1">
               <Labeled label="label">
                 <input
-                  value={f.label.text}
+                  value={f.label?.text ?? ""}
+                  placeholder={f.label ? "" : "(no question)"}
                   onChange={(e) => edit((d) => {
                     const t = d.layout.find((x) => x.id === el.id) as any;
-                    if (t) t.fields[i].label.text = e.target.value;
+                    if (!t) return;
+                    if (t.fields[i].label) t.fields[i].label.text = e.target.value;
+                    else t.fields[i].label = { text: e.target.value };
                   })}
                   className="w-full rounded bg-slate-800 px-2 py-0.5 font-deva text-[11px] text-slate-100"
                 />
@@ -832,55 +835,20 @@ function FormFieldEditor({ el }: { el: any }) {
                 </select>
               </Labeled>
 
-              <Labeled label="value">
-                <select
-                  value={
-                    f.value === null
-                      ? "null"
-                      : "options" in f.value
-                        ? "checkbox"
-                        : "value"
-                  }
-                  onChange={(e) => edit((d) => {
-                    const t = d.layout.find((x) => x.id === el.id) as any;
-                    const kind = e.target.value;
-                    if (kind === "null") t.fields[i].value = null;
-                    else if (kind === "value") {
-                      t.fields[i].value = {
-                        text: "",
-                        bbox: f.label.bbox,
-                        quad: f.label.quad,
-                        handwritten: false,
-                      };
-                    } else {
-                      t.fields[i].value = {
-                        text: "",
-                        options: [
-                          {
-                            text: "",
-                            checked: false,
-                            box_quad: f.label.quad,
-                            text_quad: f.label.quad,
-                          },
-                        ],
-                      };
-                    }
-                  })}
-                  className="w-full rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-100"
-                >
-                  <option value="null">null (empty)</option>
-                  <option value="value">text value</option>
-                  <option value="checkbox">checkbox options</option>
-                </select>
-              </Labeled>
+              {f.field_type !== "checkbox" && !f.value && (
+                <div className="text-[10px] text-slate-500">
+                  no value area — draw one over the blank / leader
+                </div>
+              )}
 
-              {f.value && "text" in f.value && !("options" in f.value) && (
+              {f.value && (
                 <>
                   <DevanagariTextarea
                     value={f.value.text}
                     onChange={(v) => edit((d) => {
                       const t = d.layout.find((x) => x.id === el.id) as any;
                       t.fields[i].value.text = v;
+                      t.fields[i].value.empty = v === "";
                     })}
                     rows={2}
                   />
@@ -898,12 +866,8 @@ function FormFieldEditor({ el }: { el: any }) {
                 </>
               )}
 
-              {f.value && "options" in f.value && (
-                <CheckboxOptionsEditor
-                  elementId={el.id}
-                  fieldIndex={i}
-                  options={f.value.options}
-                />
+              {f.field_type === "checkbox" && (
+                <CheckboxOptionsEditor elementId={el.id} fieldIndex={i} field={f} />
               )}
             </div>
           </div>
@@ -912,11 +876,9 @@ function FormFieldEditor({ el }: { el: any }) {
         <button
           onClick={() => edit((d) => {
             const t = d.layout.find((x) => x.id === el.id) as any;
-            t.fields.push({
-              label: { text: "", bbox: el.bbox, quad: el.quad },
-              field_type: "text",
-              value: null,
-            });
+            // label text only: its box is drawn or taken from a line, never
+            // the whole region's box
+            t.fields.push({ label: { text: "" }, field_type: "text", value: null });
           })}
           className="w-full rounded bg-slate-800 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700"
         >
@@ -927,34 +889,64 @@ function FormFieldEditor({ el }: { el: any }) {
   );
 }
 
+const NEXT_CHECKED = new Map<boolean | null, boolean | null>([[null, true], [true, false], [false, null]]);
+const CHECKED_MARK = (c: boolean | null) => (c === true ? "yes" : c === false ? "no" : "—");
+
+/**
+ * The options of a checkbox field. An option's word is a line of the page
+ * (edit the line to change it); new options are drawn with the Option tool.
+ */
 function CheckboxOptionsEditor({
-  elementId, fieldIndex, options,
-}: { elementId: number; fieldIndex: number; options: CheckboxOption[] }) {
+  elementId, fieldIndex, field,
+}: { elementId: number; fieldIndex: number; field: FormFieldEntry }) {
   const edit = useStore((s) => s.edit);
+  const doc = useStore((s) => s.doc);
+  const lineText = (id: number) => doc?.lines.find((ln) => ln.id === id)?.text;
+  const options: FieldOption[] = field.options ?? [];
+  const fieldOf = (d: Doc) => (d.layout.find((x) => x.id === elementId) as any)?.fields?.[fieldIndex] as
+    FormFieldEntry | undefined;
   return (
     <ul className="space-y-1">
-      {options.map((opt, oi) => (
-        <li key={oi} className="flex items-center gap-1">
+      <li>
+        <label className="flex items-center gap-2 text-[10px] text-slate-400">
           <input
             type="checkbox"
-            checked={opt.checked}
+            checked={!!field.single_choice}
             onChange={(e) => edit((d) => {
-              const t = d.layout.find((x) => x.id === elementId) as any;
-              t.fields[fieldIndex].value.options[oi].checked = e.target.checked;
+              const f = fieldOf(d);
+              if (f) f.single_choice = e.target.checked;
             })}
           />
-          <input
-            value={opt.text}
-            onChange={(e) => edit((d) => {
-              const t = d.layout.find((x) => x.id === elementId) as any;
-              t.fields[fieldIndex].value.options[oi].text = e.target.value;
+          single choice
+        </label>
+      </li>
+      {options.map((opt, oi) => (
+        <li key={`${opt.line_id}-${oi}`} className="flex items-center gap-1">
+          <button
+            title="checked: — (not marked) → yes → no"
+            disabled={opt.tick_cell_id != null}
+            onClick={() => edit((d) => {
+              const o = fieldOf(d)?.options?.[oi];
+              if (o) o.checked = NEXT_CHECKED.get(o.checked ?? null) ?? null;
             })}
-            className="flex-1 rounded bg-slate-800 px-2 py-0.5 font-deva text-[11px] text-slate-100"
-          />
+            className="w-8 rounded bg-slate-800 px-1 text-[10px] text-slate-300 disabled:opacity-50"
+          >
+            {CHECKED_MARK(opt.checked ?? null)}
+          </button>
+          <span className="flex-1 truncate font-deva text-[11px] text-slate-100">
+            {lineText(opt.line_id) ?? <span className="text-rose-400">line {opt.line_id} missing</span>}
+          </span>
+          <span className="text-[10px] text-slate-500">
+            {opt.box ? "□" : opt.tick_cell_id != null ? `cell ${opt.tick_cell_id}` : ""}
+          </span>
           <button
             onClick={() => edit((d) => {
-              const t = d.layout.find((x) => x.id === elementId) as any;
-              t.fields[fieldIndex].value.options.splice(oi, 1);
+              const f = fieldOf(d);
+              if (!f?.options) return;
+              const [gone] = f.options.splice(oi, 1);
+              // the word stays a line of the page, but is no longer an option
+              const ln = d.lines.find((l) => l.id === gone?.line_id);
+              if (ln && ln.role === "option") delete ln.role;
             })}
             className="rounded bg-slate-800 px-1 text-[10px] text-slate-400 hover:text-rose-300"
           >
@@ -962,20 +954,9 @@ function CheckboxOptionsEditor({
           </button>
         </li>
       ))}
-      <li>
-        <button
-          onClick={() => edit((d) => {
-            const t = d.layout.find((x) => x.id === elementId) as any;
-            const q = [[0, 0], [0, 0], [0, 0], [0, 0]] as any;
-            t.fields[fieldIndex].value.options.push({
-              text: "", checked: false, box_quad: q, text_quad: q,
-            });
-          })}
-          className="w-full rounded bg-slate-800 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700"
-        >
-          + option
-        </button>
-      </li>
+      {options.length === 0 && (
+        <li className="text-[10px] text-slate-500">no options yet — draw them with the Option tool</li>
+      )}
     </ul>
   );
 }
@@ -1211,17 +1192,20 @@ function FieldEditor({
 
       <Section label="label text">
         <input
-          value={field.label.text}
+          value={field.label?.text ?? ""}
+          placeholder={field.label ? "" : "(no question)"}
           onChange={(e) => edit((d) => {
             const t = d.layout.find((x) => x.id === elementId);
             if (!t || t.type !== "form_field") return;
-            t.fields[fieldIndex].label.text = e.target.value;
+            const f = t.fields[fieldIndex];
+            if (f.label) f.label.text = e.target.value;
+            else f.label = { text: e.target.value };
           })}
           className="w-full rounded bg-slate-800 px-2 py-1 font-deva text-slate-100"
         />
       </Section>
 
-      {field.value && "text" in field.value && !("options" in field.value) && (
+      {field.value && (
         <>
           <Section label="value text">
             <DevanagariTextarea
@@ -1230,7 +1214,10 @@ function FieldEditor({
                 const t = d.layout.find((x) => x.id === elementId);
                 if (!t || t.type !== "form_field") return;
                 const vv = t.fields[fieldIndex].value;
-                if (vv && "text" in vv && !("options" in vv)) vv.text = v;
+                if (vv) {
+                  vv.text = v;
+                  vv.empty = v === "";
+                }
               })}
               rows={2}
             />
@@ -1243,9 +1230,7 @@ function FieldEditor({
                 const t = d.layout.find((x) => x.id === elementId);
                 if (!t || t.type !== "form_field") return;
                 const vv = t.fields[fieldIndex].value;
-                if (vv && "text" in vv && !("options" in vv)) {
-                  vv.handwritten = e.target.checked;
-                }
+                if (vv) vv.handwritten = e.target.checked;
               })}
             />
             handwritten
@@ -1253,13 +1238,9 @@ function FieldEditor({
         </>
       )}
 
-      {field.value && "options" in field.value && (
+      {field.field_type === "checkbox" && (
         <Section label="options">
-          <CheckboxOptionsEditor
-            elementId={elementId}
-            fieldIndex={fieldIndex}
-            options={field.value.options}
-          />
+          <CheckboxOptionsEditor elementId={elementId} fieldIndex={fieldIndex} field={field} />
         </Section>
       )}
     </div>

@@ -9,6 +9,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.storage.doc_store import _atomic_write
+from app.schemas.doc_v2 import REGION_TYPES
 
 
 DEFAULT_DOC_TYPES: list[str] = [
@@ -26,14 +27,11 @@ DEFAULT_FIELD_TYPES: list[str] = [
 ]
 
 DEFAULT_LAYOUT_TYPES: list[str] = [
-    "header", "title", "heading", "subheading", "paragraph",
-    "text_line", "footer", "page_number", "signature_caption",
-    "figure", "table", "table_heading", "table_footer", "list", "list_item",
-    "form_field", "form_label", "form_value", "label", "options",
-    "logo", "signature", "stamp",
-    "handwriting", "handwritten_annotation",
-    "handwritten_correction", "handwritten_number",
-    "mixed_text",
+    # the region types of the v2 schema (doc_v2.REGION_TYPES); older type
+    # names are mapped on load by core/migrate.py
+    "title", "heading", "subheading", "paragraph", "list", "form_field",
+    "table", "table_heading", "header", "footer", "figure", "logo", "stamp",
+    "signature", "handwriting", "caption",
 ]
 
 
@@ -65,7 +63,13 @@ def _read_all() -> list[Project]:
     p = _path()
     if not p.exists():
         return []
-    return [Project(**item) for item in json.loads(p.read_text(encoding="utf-8"))]
+    projects = [Project(**item) for item in json.loads(p.read_text(encoding="utf-8"))]
+    for pr in projects:
+        # a project saved before the type list changed may still list old
+        # region types (text_line, list_item, …): offer only current ones
+        kept = [t for t in pr.layout_types if t in REGION_TYPES]
+        pr.layout_types = kept or list(DEFAULT_LAYOUT_TYPES)
+    return projects
 
 
 def _write_all(projects: list[Project]) -> None:

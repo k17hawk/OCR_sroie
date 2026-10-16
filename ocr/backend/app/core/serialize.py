@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Callable
 
 from app.schemas.doc_v2 import (
-    CheckboxOption,
     FormFieldEntry,
     ListItem,
     TableCell,
@@ -20,22 +19,24 @@ _BULLET_MARKERS: frozenset[str] = frozenset(
 )
 
 
-def serialize_checkbox_value(options: list[CheckboxOption]) -> str:
-    """``"[x] A [ ] B"`` — options joined by single spaces, in order."""
-    return " ".join(
-        f"[{'x' if opt.checked else ' '}] {opt.text}" for opt in options
-    )
-
-
-def serialize_form_field(fields: list[FormFieldEntry]) -> str:
-    """One line per field: ``label.text + " " + value.text`` (just the label
-    when ``value`` is null). Joined with ``\\n``."""
+def serialize_form_field(
+    fields: list[FormFieldEntry],
+    line_text: "Callable[[int], str | None] | None" = None,
+) -> str:
+    """One line per field: the label, then the value text, or for a checkbox
+    field the option words in ``options[]`` order. Joined with ``\\n``.
+    ``line_text(id)`` gives the text of an option line."""
     out: list[str] = []
     for f in fields:
-        if f.value is None:
-            out.append(f.label.text)
-        else:
-            out.append(f"{f.label.text} {f.value.text}")
+        parts = [f.label.text] if f.label is not None and f.label.text else []
+        if f.options:
+            for o in f.options:
+                t = line_text(o.line_id) if line_text is not None else None
+                if t:
+                    parts.append(t)
+        elif f.value is not None and f.value.text:
+            parts.append(f.value.text)
+        out.append(" ".join(parts))
     return "\n".join(out)
 
 

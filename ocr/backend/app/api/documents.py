@@ -58,6 +58,7 @@ def _read_doc_response(row: doc_service.doc_store.DocumentRow) -> DocumentRead:
         image_url=get_storage().url(row.image_key),
         source_file_id=row.source_file_id,
         doc=row.doc,
+        warnings=row.load_warnings,
     )
 
 

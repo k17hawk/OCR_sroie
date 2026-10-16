@@ -3,7 +3,7 @@ import {
   Rect, Text, Line, Arrow, Circle, Group, Image as KImage,
 } from "react-konva";
 
-import type { Doc, LayoutElement, BBox } from "../types";
+import type { Doc, LayoutElement, BBox, FormFieldEntry } from "../types";
 import { quadPoints } from "../lib";
 import {
   typeColor, prettyType, TEXT_LIKE_TYPES, KIND_COLORS,
@@ -430,6 +430,9 @@ export function TableLayer({ doc }: { doc: Doc }) {
 // Form fields
 // ===========================================================================
 
+/** an option nobody has marked yet (checked null) */
+const OPTION_UNMARKED = "#94a3b8";
+
 export function FormFieldLayer({ doc }: { doc: Doc }) {
   const selection = useStore((s) => s.selection);
   const k = useK();
@@ -439,40 +442,35 @@ export function FormFieldLayer({ doc }: { doc: Doc }) {
       elementId: number;
       fieldIndex: number;
       labelText: string;
-      labelBox: BBox;
+      labelBox: BBox | null;
       valueText: string | null;
       valueBox: BBox | null;
-      options: { text: string; box: BBox; checked: boolean }[];
+      options: { text: string; box: BBox; checked: boolean | null }[];
     }[] = [];
+    const lineById = new Map(doc.lines.filter((ln) => ln.id != null).map((ln) => [ln.id as number, ln]));
+    const cellBox = (el: any, cellId: number | undefined): BBox | null => {
+      if (cellId == null || el.type !== "table") return null;
+      return doc.tables[el.table_index]?.cells.find((c) => c.id === cellId)?.bbox ?? null;
+    };
 
     for (const el of doc.layout) {
-      if (el.type !== "form_field") continue;
-      el.fields.forEach((f: any, fi: number) => {
-        let valueBox: BBox | null = null;
-        let valueText: string | null = null;
-        const options: { text: string; box: BBox; checked: boolean }[] = [];
-        if (f.value && "bbox" in f.value) {
-          valueBox = f.value.bbox;
-          valueText = f.value.text;
-        } else if (f.value && "options" in f.value) {
-          valueText = f.value.text;
-          for (const opt of f.value.options) {
-            const xs = opt.box_quad.map((p: number[]) => p[0]);
-            const ys = opt.box_quad.map((p: number[]) => p[1]);
-            options.push({
-              text: opt.text,
-              box: [
-                Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)),
-                Math.ceil(Math.max(...xs)), Math.ceil(Math.max(...ys)),
-              ],
-              checked: opt.checked,
-            });
-          }
-        }
+      const elFields = (el as any).fields as FormFieldEntry[] | undefined;
+      if (!elFields?.length) continue;
+      elFields.forEach((f, fi) => {
+        const lab = f.label;
+        const labelBox = lab?.bbox
+          ?? (lab?.line_id != null ? lineById.get(lab.line_id)?.bbox : undefined)
+          ?? cellBox(el, lab?.cell_id);
+        // an option is drawn on its printed square, else on its word
+        const options = (f.options ?? []).flatMap((o) => {
+          const ln = lineById.get(o.line_id);
+          const box = o.box ?? ln?.bbox;
+          return box ? [{ text: ln?.text ?? "", box, checked: o.checked ?? null }] : [];
+        });
         out.push({
           elementId: el.id, fieldIndex: fi,
-          labelText: f.label.text, labelBox: f.label.bbox,
-          valueBox, valueText, options,
+          labelText: lab?.text ?? "", labelBox: labelBox ?? null,
+          valueBox: f.value?.bbox ?? null, valueText: f.value?.text ?? null, options,
         });
       });
     }
@@ -486,18 +484,23 @@ export function FormFieldLayer({ doc }: { doc: Doc }) {
           selection?.kind === "field" &&
           selection.elementId === f.elementId &&
           selection.fieldIndex === f.fieldIndex;
-        const [lx0, ly0, lx1, ly1] = f.labelBox;
+        const lb = f.labelBox;
+        const [lx0, ly0, lx1, ly1] = lb ?? [0, 0, 0, 0];
         const lw = Math.max(2, lx1 - lx0), lh = Math.max(2, ly1 - ly0);
 
         return (
           <Group key={`field-${i}`} listening={false}>
-            <Rect
-              x={lx0} y={ly0} width={lw} height={lh}
-              fill={`${KIND_COLORS.fieldLabel}${isSel ? "38" : "1c"}`}
-              listening={false}
-            />
-            <BoxText bbox={f.labelBox} text={f.labelText} k={k} maxFont={Math.max(10, lh * 0.85)} />
-            <Outline bbox={f.labelBox} color={KIND_COLORS.fieldLabel} width={isSel ? 3 : 1.75} glow={isSel} />
+            {lb && (
+              <>
+                <Rect
+                  x={lx0} y={ly0} width={lw} height={lh}
+                  fill={`${KIND_COLORS.fieldLabel}${isSel ? "38" : "1c"}`}
+                  listening={false}
+                />
+                <BoxText bbox={lb} text={f.labelText} k={k} maxFont={Math.max(10, lh * 0.85)} />
+                <Outline bbox={lb} color={KIND_COLORS.fieldLabel} width={isSel ? 3 : 1.75} glow={isSel} />
+              </>
+            )}
 
             {f.valueBox && (() => {
               const [vx0, vy0, vx1, vy1] = f.valueBox;
@@ -511,7 +514,7 @@ export function FormFieldLayer({ doc }: { doc: Doc }) {
                   />
                   <BoxText bbox={f.valueBox} text={f.valueText ?? ""} k={k} maxFont={Math.max(10, vh * 0.85)} />
                   <Outline bbox={f.valueBox} color={KIND_COLORS.fieldValue} width={isSel ? 3 : 1.75} glow={isSel} />
-                  <Arrow
+                  {lb && <Arrow
                     points={[lx0 + lw, ly0 + lh / 2, vx0, vy0 + vh / 2]}
                     stroke={KIND_COLORS.fieldLabel}
                     fill={KIND_COLORS.fieldLabel}
@@ -520,14 +523,15 @@ export function FormFieldLayer({ doc }: { doc: Doc }) {
                     pointerLength={7 / k}
                     pointerWidth={7 / k}
                     listening={false}
-                  />
+                  />}
                 </>
               );
             })()}
 
             {f.options.map((opt, oi) => {
               const [ox0, oy0, ox1, oy1] = opt.box;
-              const color = opt.checked ? KIND_COLORS.checked : KIND_COLORS.unchecked;
+              const color = opt.checked === true ? KIND_COLORS.checked
+                : opt.checked === false ? KIND_COLORS.unchecked : OPTION_UNMARKED;
               return (
                 <Group key={`opt-${i}-${oi}`} listening={false}>
                   <Rect

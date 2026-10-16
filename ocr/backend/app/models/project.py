@@ -30,20 +30,11 @@ DEFAULT_FIELD_TYPES: list[str] = [
 ]
 
 DEFAULT_LAYOUT_TYPES: list[str] = [
-    # structural
-    "header", "title", "heading", "subheading", "paragraph",
-    "text_line", "footer", "page_number", "signature_caption",
-    # blocks
-    "figure", "table", "table_heading", "table_footer", "list", "list_item",
-    # forms
-    "form_field", "form_label", "form_value", "label", "options",
-    # marks
-    "logo", "signature", "stamp",
-    # handwriting
-    "handwriting", "handwritten_annotation",
-    "handwritten_correction", "handwritten_number",
-    # misc
-    "mixed_text",
+    # the region types of the v2 schema (doc_v2.REGION_TYPES); older type
+    # names are mapped on load by core/migrate.py
+    "title", "heading", "subheading", "paragraph", "list", "form_field",
+    "table", "table_heading", "header", "footer", "figure", "logo", "stamp",
+    "signature", "handwriting", "caption",
 ]
 
 

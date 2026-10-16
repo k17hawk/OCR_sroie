@@ -31,6 +31,7 @@ import logging
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
+from app.core.migrate import migrate
 from app.schemas.doc_v2 import Doc
 from app.services.geometry import ensure_quads
 
@@ -57,6 +58,8 @@ class DocumentRow:
     # None for documents stored the old way in _db/documents/
     doc_key: str | None = None
     source_stem: str | None = None
+    # what migrate() changed when this page was loaded (not stored)
+    load_warnings: list[dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -118,7 +121,14 @@ def _row_doc_path(document_id: str, doc_key: str | None) -> Path:
     return key_path(doc_key) if doc_key else _doc_path(document_id)
 
 
-def read_doc_file(path: Path) -> Doc:
+def doc_from_record(data: dict[str, Any]) -> tuple[Doc, list[dict[str, Any]]]:
+    """Old page record -> current Doc, plus what migrate() changed."""
+    data, warnings = migrate(data)
+    # ensure_quads: old files may have missing or stale quads.
+    return Doc.model_validate(ensure_quads(data)), warnings
+
+
+def read_doc_file_with_warnings(path: Path) -> tuple[Doc, list[dict[str, Any]]]:
     """A page .jsonl holds one JSON line; a pretty-printed (hand-edited)
     file is accepted too."""
     text = path.read_text(encoding="utf-8").strip()
@@ -127,8 +137,11 @@ def read_doc_file(path: Path) -> Doc:
     except json.JSONDecodeError:
         first = next((ln for ln in text.splitlines() if ln.strip()), "")
         data = json.loads(first)
-    # ensure_quads: old files may have missing or stale quads.
-    return Doc.model_validate(ensure_quads(data))
+    return doc_from_record(data)
+
+
+def read_doc_file(path: Path) -> Doc:
+    return read_doc_file_with_warnings(path)[0]
 
 
 def _meta_path(document_id: str) -> Path:
@@ -203,7 +216,10 @@ def load(document_id: str) -> DocumentRow | None:
     if not doc_file.exists():
         return None
 
-    doc = read_doc_file(doc_file)
+    doc, load_warnings = read_doc_file_with_warnings(doc_file)
+    if load_warnings:
+        log.info("%s: migrated on load:\n  %s", document_id,
+                 "\n  ".join(w["message"] for w in load_warnings))
 
     # Auto-detect a hand-edit of the Doc file and bump revision so
     # optimistic locking stays honest.
@@ -226,6 +242,7 @@ def load(document_id: str) -> DocumentRow | None:
         legacy_font=meta.get("legacy_font"),
         doc_key=meta.get("doc_key"),
         source_stem=meta.get("source_stem"),
+        load_warnings=load_warnings,
         created_at=meta.get("created_at", datetime.now(timezone.utc).isoformat()),
         updated_at=meta.get("updated_at", datetime.now(timezone.utc).isoformat()),
     )

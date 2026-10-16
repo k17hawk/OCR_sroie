@@ -1,6 +1,6 @@
 import type {
   Doc, Job, UploadResponse, OcrRegionResponse,
-  ModelFamily, SystemDevices, DocumentSummary,
+  ModelFamily, SystemDevices, DocumentSummary, LoadWarning,
 } from "./types";
 
 import type { Project, TableOcrResponse, Table } from "./types";
@@ -18,6 +18,7 @@ export async function getDocument(id: string): Promise<{
   revision: number;
   image_url: string;
   source_file_id: string | null;
+  warnings: LoadWarning[];
 }> {
   const r = await fetch(`/documents/${id}`);
   if (!r.ok) throw new Error(await r.text());
@@ -27,6 +28,7 @@ export async function getDocument(id: string): Promise<{
     revision: j.revision as number,
     image_url: j.image_url as string,
     source_file_id: (j.source_file_id ?? null) as string | null,
+    warnings: (Array.isArray(j.warnings) ? j.warnings : []) as LoadWarning[],
   };
 }
 

@@ -228,6 +228,7 @@ export function Toolbar() {
                 ? "Saved ✓"
                 : "Save"}
           </button>
+          <LoadWarningsNote />
           {saveStatus.state === "error" && (
             <div className="absolute right-0 top-full z-50 mt-1 w-80 whitespace-pre-wrap rounded border border-rose-700 bg-rose-950 p-2 text-[11px] text-rose-100 shadow-lg">
               <button
@@ -264,6 +265,33 @@ export function Toolbar() {
           Auto-annotate
         </button>
       </div>
+    </div>
+  );
+}
+
+/** What the server changed to load an older page file (e.g. a region typed
+ *  text_line loaded as paragraph). Shown once per page until dismissed. */
+function LoadWarningsNote() {
+  const warnings = useStore((s) => s.loadWarnings);
+  const setLoadWarnings = useStore((s) => s.setLoadWarnings);
+  const saveFailed = useStore((s) => s.saveStatus.state === "error");
+  if (!warnings.length || saveFailed) return null;
+  return (
+    <div className="absolute right-0 top-full z-50 mt-1 max-h-72 w-96 overflow-auto whitespace-pre-wrap rounded border border-amber-700 bg-amber-950 p-2 text-[11px] text-amber-100 shadow-lg">
+      <button
+        onClick={() => setLoadWarnings([])}
+        className="float-right ml-2 text-amber-300 hover:text-white"
+        title="Dismiss"
+      >
+        ✕
+      </button>
+      <div className="mb-1 font-medium">This page was written by an older version and was updated on load:</div>
+      <ul className="list-disc space-y-0.5 pl-4">
+        {warnings.map((w, i) => (
+          <li key={i} className={w.level === "error" ? "text-rose-300" : ""}>{w.message}</li>
+        ))}
+      </ul>
+      <div className="mt-1 text-amber-300">Saving the page stores it in the new form.</div>
     </div>
   );
 }

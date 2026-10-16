@@ -403,18 +403,18 @@ export function FieldHandles({
 
   return (
     <>
-      <QuadHandlesFor
-        quad={field.label.quad as Quad}
-        onChange={(q, { alt }) => {
-          edit((d) => {
+      {field.label?.quad && (
+        <QuadHandlesFor
+          quad={field.label.quad as Quad}
+          onChange={(q) => edit((d) => {
             const t = d.layout.find((x) => x.id === elementId);
-            if (!t || t.type !== "form_field") return;
-            t.fields[fieldIndex].label.quad = q;
-            t.fields[fieldIndex].label.bbox = bboxOf(q);
-          });
-          void snapChildToInk({ get: (d) => fieldPart(d, elementId, fieldIndex, "label"), parent: regionBox(elementId) }, bboxOf(q), alt);
-        }}
-      />
+            const lab = t && t.type === "form_field" ? t.fields[fieldIndex].label : null;
+            if (!lab) return;
+            lab.quad = q;
+            lab.bbox = bboxOf(q);
+          })}
+        />
+      )}
       {field.value && "quad" in field.value && (
         <QuadHandlesFor
           quad={field.value.quad as Quad}

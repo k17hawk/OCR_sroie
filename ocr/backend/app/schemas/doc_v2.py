@@ -9,7 +9,7 @@ the sample disagreed.
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Literal, Optional, Union
+from typing import Annotated, Any, ClassVar, Literal, Optional, Union, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
@@ -76,38 +76,98 @@ class _Schema(BaseModel):
 # Form-field internals
 # ---------------------------------------------------------------------------
 
+FIELD_TYPES: tuple[str, ...] = (
+    "text", "name", "number", "date_bs", "date_ad", "checkbox", "photo", "signature_ref",
+)
+
+
 class FormFieldLabel(_Schema):
-    text: str
-    bbox: BBox
-    quad: Quad
+    """The printed question of a field.
+
+    Where it is, at most one of:
+      * ``line_id``   — a label line of this region (text/bbox copied from it)
+      * ``cell_id``   — a cell of this region's table (may also have a bbox
+                        inside that cell, and a line_id)
+      * ``region_id`` — another region (e.g. a table_heading); no bbox
+    or only ``text`` + ``bbox`` (a label drawn without a line).
+    """
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset(
+        {"bbox", "quad", "cell_id", "region_id", "line_id"}
+    )
+
+    text: str = ""
+    bbox: Optional[BBox] = None
+    quad: Optional[Quad] = None
+    cell_id: Optional[int] = None
+    region_id: Optional[int] = None
+    line_id: Optional[int] = None
 
 
-class CheckboxOption(_Schema):
-    text: str
-    checked: bool
-    box_quad: Quad
-    text_quad: Quad
+class FieldOption(_Schema):
+    """One choice of a checkbox field. Its word is the line ``line_id``
+    (role "option"); the option itself never copies the text.
+
+    Tick area: a printed square (``box``) or a separate tick cell
+    (``tick_cell_id``), or neither when the form shows none."""
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"box", "box_quad", "tick_cell_id"})
+
+    line_id: int
+    checked: Optional[bool] = None
+    box: Optional[BBox] = None
+    box_quad: Optional[Quad] = None
+    tick_cell_id: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_box_quad(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            if data.get("box") is None:
+                data.pop("box_quad", None)
+            else:
+                tmp = {"bbox": data["box"], "quad": data.get("box_quad")}
+                fix_quad(tmp)
+                data["box_quad"] = tmp.get("quad")
+        return data
 
 
 class NormalFieldValue(_Schema):
-    text: str
+    """Where the answer goes (a leader / blank / value cell) and what is
+    written there. ``empty`` is derived: ``text == ""``."""
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"cell_id"})
+
+    text: str = ""
     bbox: BBox
     quad: Quad
-    handwritten: bool
+    handwritten: bool = False
+    empty: bool = True
+    cell_id: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_empty(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            data["empty"] = (data.get("text") or "") == ""
+        return data
 
 
-class CheckboxFieldValue(_Schema):
-    text: str
-    options: list[CheckboxOption]
-
-
-FieldValue = Union[NormalFieldValue, CheckboxFieldValue]
+FieldValue = NormalFieldValue
 
 
 class FormFieldEntry(_Schema):
-    label: FormFieldLabel
-    field_type: str
+    """A question of a form_field, table or list region.
+
+    Checkbox fields keep ``value`` null; the answer is ``options[].checked``.
+    ``label`` may be null only for a checkbox field (a choice group with no
+    printed question)."""
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"single_choice", "options"})
+
+    label: Optional[FormFieldLabel] = None
+    field_type: str = "text"
+    single_choice: Optional[bool] = None
     value: Optional[FieldValue] = None
+    options: Optional[list[FieldOption]] = None
 
 
 class ListItem(_Schema):
@@ -132,7 +192,7 @@ class _LayoutBase(_Schema):
     """Common base of every layout element: parent_id / parent_item are left
     out of the JSON when not set."""
     _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset(
-        {"parent_id", "parent_item", "subtype", "handwritten"}
+        {"parent_id", "parent_item", "subtype", "handwritten", "fields"}
     )
 
 
@@ -156,40 +216,8 @@ class SubheadingLayout(_TextLayout):
     type: Literal["subheading"] = "subheading"
 
 
-class TextLineLayout(_TextLayout):
-    type: Literal["text_line"] = "text_line"
-
-
-class ListItemLayout(_TextLayout):
-    type: Literal["list_item"] = "list_item"
-
-
-class OptionsLayout(_TextLayout):
-    type: Literal["options"] = "options"
-
-
-class FormLabelLayout(_TextLayout):
-    type: Literal["form_label"] = "form_label"
-
-
-class FormValueLayout(_TextLayout):
-    type: Literal["form_value"] = "form_value"
-
-
-class LabelLayout(_TextLayout):
-    type: Literal["label"] = "label"
-
-
-class PageNumberLayout(_TextLayout):
-    type: Literal["page_number"] = "page_number"
-
-
 class TableHeadingLayout(_TextLayout):
     type: Literal["table_heading"] = "table_heading"
-
-
-class TableFooterLayout(_TextLayout):
-    type: Literal["table_footer"] = "table_footer"
 
 
 class HandwritingLayout(_LayoutBase):
@@ -203,22 +231,6 @@ class HandwritingLayout(_LayoutBase):
     parent_id: Optional[int] = None
     parent_item: Optional[int] = None
     quad: Quad
-
-
-class HandwrittenAnnotationLayout(_TextLayout):
-    type: Literal["handwritten_annotation"] = "handwritten_annotation"
-
-
-class HandwrittenCorrectionLayout(_TextLayout):
-    type: Literal["handwritten_correction"] = "handwritten_correction"
-
-
-class HandwrittenNumberLayout(_TextLayout):
-    type: Literal["handwritten_number"] = "handwritten_number"
-
-
-class MixedTextLayout(_TextLayout):
-    type: Literal["mixed_text"] = "mixed_text"
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +291,7 @@ class TableLayout(_LayoutBase):
     reading_order: Optional[int] = None
     text: str
     table_index: int
+    fields: Optional[list[FormFieldEntry]] = None
     parent_id: Optional[int] = None
     parent_item: Optional[int] = None
     quad: Quad
@@ -292,6 +305,7 @@ class ListLayout(_LayoutBase):
     text: str
     list_style: str
     items: list[ListItem]
+    fields: Optional[list[FormFieldEntry]] = None
     parent_id: Optional[int] = None
     parent_item: Optional[int] = None
     quad: Quad
@@ -308,15 +322,8 @@ class ParagraphLayout(_LayoutBase):
     quad: Quad
 
 
-class SignatureCaptionLayout(_LayoutBase):
-    id: int
-    type: Literal["signature_caption"] = "signature_caption"
-    bbox: BBox
-    reading_order: Optional[int] = None
-    text: str
-    parent_id: Optional[int] = None
-    parent_item: Optional[int] = None
-    quad: Quad
+class CaptionLayout(_TextLayout):
+    type: Literal["caption"] = "caption"
 
 
 class FooterLayout(_LayoutBase):
@@ -374,34 +381,21 @@ LayoutElement = Annotated[
         HeadingLayout,
         SubheadingLayout,
         ParagraphLayout,
-        TextLineLayout,
         FooterLayout,
-        PageNumberLayout,
-        SignatureCaptionLayout,
+        CaptionLayout,
         # blocks
         FigureLayout,
         TableLayout,
         TableHeadingLayout,
-        TableFooterLayout,
         ListLayout,
-        ListItemLayout,
         # forms
         FormFieldLayout,
-        FormLabelLayout,
-        FormValueLayout,
-        LabelLayout,
-        OptionsLayout,
         # marks
         LogoLayout,
         SignatureLayout,
         StampLayout,
         # handwriting
         HandwritingLayout,
-        HandwrittenAnnotationLayout,
-        HandwrittenCorrectionLayout,
-        HandwrittenNumberLayout,
-        # misc
-        MixedTextLayout,
     ],
     Field(discriminator="type"),
 ]
@@ -425,9 +419,12 @@ class Block(_Schema):
 
 class Line(_Schema):
     _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset(
-        {"role", "handwritten", "table_index", "cell_id", "list_level", "item_index"}
+        {"id", "role", "handwritten", "table_index", "cell_id", "list_level", "item_index"}
     )
 
+    # stable per page; never reused after a deletion (see Doc.next_line_id).
+    # Fields reference lines by this id (label.line_id, options[].line_id).
+    id: Optional[int] = None
     text: str
     bbox: BBox
     block_id: int
@@ -570,6 +567,8 @@ class Annotation(_Schema):
 # ---------------------------------------------------------------------------
 
 class Doc(_Schema):
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"next_line_id"})
+
     v: int = 2
     image: str
     width: int
@@ -578,7 +577,7 @@ class Doc(_Schema):
     page_number: int
     page_count: int
     language: Literal["ne", "en", "mixed", "hi"]
-    digit_style: Literal["devanagari", "dev", "latin", "mixed"]
+    digit_style: Literal["devanagari", "dev", "latin", "mixed", "none"]
     doc_type: str
     text: str
     fonts: list[Any] = []
@@ -591,6 +590,8 @@ class Doc(_Schema):
     extra_regions: list[ExtraRegion]
     quality: Quality
     annotation: Annotation
+    # the id the next new line gets (> every id ever used on this page)
+    next_line_id: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +601,12 @@ class Doc(_Schema):
 
 Doc.model_rebuild()
 
+# The region types a page may use (section 1a), read from the union.
+REGION_TYPES: frozenset[str] = frozenset(
+    m.model_fields["type"].default
+    for m in get_args(get_args(LayoutElement)[0])
+)
+
 
 # ---------------------------------------------------------------------------
 # Re-exports for convenience (unchanged from prior file)
@@ -607,18 +614,14 @@ Doc.model_rebuild()
 
 __all__ = [
     "Point", "BBox", "Quad",
-    "FormFieldLabel", "CheckboxOption", "NormalFieldValue",
-    "CheckboxFieldValue", "FieldValue", "FormFieldEntry", "ListItem",
-    "TitleLayout", "SubheadingLayout", "TextLineLayout", "ListItemLayout",
-    "OptionsLayout", "FormLabelLayout", "FormValueLayout", "LabelLayout",
-    "PageNumberLayout", "TableHeadingLayout", "TableFooterLayout",
-    "HandwritingLayout", "HandwrittenAnnotationLayout",
-    "HandwrittenCorrectionLayout", "HandwrittenNumberLayout",
-    "MixedTextLayout",
+    "FIELD_TYPES", "FormFieldLabel", "FieldOption", "NormalFieldValue",
+    "FieldValue", "FormFieldEntry", "ListItem",
+    "TitleLayout", "SubheadingLayout", "TableHeadingLayout", "CaptionLayout",
+    "HandwritingLayout",
     "HeaderLayout", "HeadingLayout", "FigureLayout", "FormFieldLayout",
-    "TableLayout", "ListLayout", "ParagraphLayout", "SignatureCaptionLayout",
+    "TableLayout", "ListLayout", "ParagraphLayout",
     "FooterLayout", "LogoLayout", "SignatureLayout", "StampLayout",
     "LayoutElement", "Block", "Line", "TableCell", "Table", "RulingLine",
     "CheckboxExtraRegion", "FingerprintExtraRegion", "ExtraRegion",
-    "RawLengths", "Quality", "Annotation", "Doc",
+    "RawLengths", "Quality", "Annotation", "Doc", "REGION_TYPES",
 ]

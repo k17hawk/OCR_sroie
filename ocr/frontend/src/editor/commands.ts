@@ -1,5 +1,5 @@
 import type {
-  BBox, Doc, ExtraRegion, FormFieldEntry, FormFieldLabel, LayoutElement,
+  BBox, Doc, FormFieldEntry, FormFieldLabel, LayoutElement,
   Line, NormalFieldValue, Quad, Table,
 } from "../types";
 import type { Selection } from "../store";
@@ -20,7 +20,7 @@ export function emptyLayout(type: string, bbox: BBox, id: number): LayoutElement
     case "header":   return { ...base, type: "header" };
     case "footer":   return { ...base, type: "footer" };
     case "paragraph":return { ...base, type: "paragraph" };
-    case "signature_caption": return { ...base, type: "signature_caption" };
+    case "caption":  return { ...base, type: "caption" };
     case "heading":  return { ...base, type: "heading", level: 2, text: "# " };
     case "figure":   return { ...base, type: "figure", subtype: "photo", text: "<figure/>" };
     case "form_field":
@@ -101,6 +101,7 @@ export function addFormField(d: Doc, labelBox: BBox, valueBox: BBox | null): num
       bbox: valueBox,
       quad: quadFromBBox(valueBox),
       handwritten: false,
+      empty: true,
     } as NormalFieldValue;
   }
   el.fields.push({ label, field_type: "text", value });
@@ -119,49 +120,6 @@ export function setReadingOrder(d: Doc, ids: number[]): void {
   }
   for (const el of d.layout) {
     if (!locked.has(el.id) && !ids.includes(el.id)) el.reading_order = null;
-  }
-}
-
-export function mirrorCheckboxExtra(d: Doc): void {
-  // Rebuild the checkboxes that mirror form-field options, but KEEP
-  // standalone checkboxes (drawn / converted from a box via the Type
-  // dropdown). Before, every checkbox region was deleted here.
-  const optionBoxes = new Set<string>();
-  for (const el of d.layout) {
-    if (el.type !== "form_field") continue;
-    for (const f of el.fields) {
-      if (!f.value || !("options" in f.value)) continue;
-      for (const opt of f.value.options) {
-        const q = opt.box_quad;
-        optionBoxes.add([
-          Math.floor(Math.min(q[0][0], q[2][0])), Math.floor(Math.min(q[0][1], q[2][1])),
-          Math.ceil(Math.max(q[0][0], q[2][0])), Math.ceil(Math.max(q[0][1], q[2][1])),
-        ].join(","));
-      }
-    }
-  }
-  d.extra_regions = d.extra_regions.filter(
-    (er) => er.type !== "checkbox" || !optionBoxes.has(er.bbox.join(",")),
-  );
-  for (const el of d.layout) {
-    if (el.type !== "form_field") continue;
-    for (const f of el.fields) {
-      if (!f.value || !("options" in f.value)) continue;
-      for (const opt of f.value.options) {
-        d.extra_regions.push({
-          type: "checkbox",
-          checked: opt.checked,
-          option: opt.text,
-          bbox: [
-            Math.floor(Math.min(opt.box_quad[0][0], opt.box_quad[2][0])),
-            Math.floor(Math.min(opt.box_quad[0][1], opt.box_quad[2][1])),
-            Math.ceil(Math.max(opt.box_quad[0][0], opt.box_quad[2][0])),
-            Math.ceil(Math.max(opt.box_quad[0][1], opt.box_quad[2][1])),
-          ],
-          quad: opt.box_quad,
-        } as ExtraRegion);
-      }
-    }
   }
 }
 
@@ -185,18 +143,13 @@ export function mirrorCheckboxExtra(d: Doc): void {
 //             rows of cells separated by " | " also work.
 // ---------------------------------------------------------------------------
 
-function rowBox(b: BBox, i: number, n: number): BBox {
-  const h = Math.max(1, (b[3] - b[1]) / Math.max(1, n));
-  return [b[0], Math.round(b[1] + i * h), b[2], Math.round(b[1] + (i + 1) * h)];
-}
-
 /** What the generic text box shows for a form field. */
 export function formFieldText(el: any): string {
   return (el.fields ?? [])
     .map((f: FormFieldEntry) => {
       const label = f.label?.text ?? "";
-      const v = f.value as any;
-      if (!v || "options" in v) return label;
+      const v = f.value;
+      if (!v || f.field_type === "checkbox") return label;
       const sep = label.trimEnd().endsWith(":") ? " " : ": ";
       return `${label}${sep}${v.text ?? ""}`;
     })
@@ -220,26 +173,22 @@ function setFormFieldText(el: any, text: string): void {
     const labelText = colon >= 0 ? row.slice(0, colon + 1) : row;
     const valueText = colon >= 0 ? row.slice(colon + 1).trim() : null;
 
+    // A new field typed here gets its label text only: its boxes are drawn
+    // with the field tools, never guessed (no evenly split placeholder rows).
     let f = el.fields[i] as FormFieldEntry | undefined;
     if (!f) {
-      const b = rowBox(el.bbox, i, n);
-      const split = Math.round(b[0] + (b[2] - b[0]) * 0.4);
-      const lb: BBox = [b[0], b[1], split, b[3]];
-      f = { label: { text: "", bbox: lb, quad: quadFromBBox(lb) }, field_type: "text", value: null };
+      f = { label: { text: "" }, field_type: "text", value: null };
       el.fields.push(f);
     }
-    f.label.text = labelText.trim();
+    if (f.label) f.label.text = labelText.trim();
+    else f.label = { text: labelText.trim() };
 
-    const v = f.value as any;
-    if (v && "options" in v) return; // checkbox: options are edited below
-    if (valueText === null) {
-      if (v) v.text = "";
-    } else if (v) {
-      v.text = valueText;
-    } else {
-      const lb = f.label.bbox;
-      const vb: BBox = [lb[2], lb[1], Math.max(lb[2] + 4, el.bbox[2]), lb[3]];
-      f.value = { text: valueText, bbox: vb, quad: quadFromBBox(vb), handwritten: false };
+    const v = f.value;
+    if (f.field_type === "checkbox") return; // options are edited in the field panel
+    // a value is stored only where its value area was drawn
+    if (v) {
+      v.text = valueText ?? "";
+      v.empty = v.text === "";
     }
   });
 
@@ -669,15 +618,23 @@ function moveObject(
   }
 }
 
-function moveQuad(
-  o: Record<string, unknown>,
-  key: string,
-  dx: number,
-  dy: number,
-): void {
-  const q = o[key] as Quad | undefined;
-  if (!q) return;
-  o[key] = q.map((p) => [p[0] + dx, p[1] + dy]) as Quad;
+/**
+ * Call `fn` on every box a region's fields own: drawn label boxes, value
+ * areas and option squares (`box` + `box_quad`). Labels that are a line,
+ * a cell or another region have no box of their own here.
+ */
+function eachFieldBox(el: any, fn: (o: { bbox: BBox; quad?: Quad }) => void): void {
+  for (const f of (el.fields ?? []) as FormFieldEntry[]) {
+    if (f.label?.bbox) fn(f.label as { bbox: BBox; quad?: Quad });
+    if (f.value?.bbox) fn(f.value);
+    for (const o of f.options ?? []) {
+      if (!o.box) continue;
+      const t: { bbox: BBox; quad?: Quad } = { bbox: o.box, quad: o.box_quad };
+      fn(t);
+      o.box = t.bbox;
+      if (t.quad) o.box_quad = t.quad;
+    }
+  }
 }
 
 /**
@@ -700,18 +657,7 @@ export function translateLayoutElement(
     if (ln.block_id === id) moveObject(ln, dx, dy);
   }
 
-  if (el.type === "form_field") {
-    for (const f of el.fields) {
-      moveObject(f.label, dx, dy);
-      if (f.value && "bbox" in f.value) moveObject(f.value, dx, dy);
-      if (f.value && "options" in f.value) {
-        for (const opt of f.value.options) {
-          moveQuad(opt as unknown as Record<string, unknown>, "box_quad", dx, dy);
-          moveQuad(opt as unknown as Record<string, unknown>, "text_quad", dx, dy);
-        }
-      }
-    }
-  }
+  eachFieldBox(el, (o) => moveObject(o, dx, dy));
 
   if (el.type === "table") {
     const t = d.tables[(el as any).table_index];
@@ -774,18 +720,7 @@ export function resizeLayoutElement(
 
   for (const ln of d.lines) if (ln.block_id === id) mapBox(ln);
 
-  if (el.type === "form_field") {
-    for (const f of el.fields) {
-      mapBox(f.label);
-      if (f.value && "bbox" in f.value) mapBox(f.value);
-      if (f.value && "options" in f.value) {
-        for (const opt of f.value.options) {
-          opt.box_quad = opt.box_quad.map(mapPoint) as Quad;
-          opt.text_quad = opt.text_quad.map(mapPoint) as Quad;
-        }
-      }
-    }
-  }
+  eachFieldBox(el, mapBox);
 
   if (el.type === "table") {
     const t = d.tables[(el as any).table_index];
@@ -1120,13 +1055,9 @@ export function syncListLines(d: Doc, listId: number): void {
         ...group[0], ...base, text: want, bbox,
         quad: group.length === 1 ? group[0].quad : quadFromBBox(bbox),
       });
-    } else {
-      const bbox = rowBox(el.bbox, i, Math.max(1, items.length));
-      fresh.push({
-        text: want, bbox, ...base, line_in_block: 0,
-        font_size: Math.max(8, (bbox[3] - bbox[1]) * 0.7), font_id: null, quad: quadFromBBox(bbox),
-      });
     }
+    // an item with no measured line gets none (no evenly split placeholder
+    // rows): draw its line, or use Detect lines
   });
   fresh.forEach((ln, k) => { ln.line_in_block = k; });
   replaceLines(d, (ln) => ln.block_id === listId, fresh);
