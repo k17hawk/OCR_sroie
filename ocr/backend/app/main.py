@@ -26,6 +26,15 @@ app.include_router(jobs.router)
 
 app.include_router(system.router)
 
+
+
+
+@app.on_event("startup")
+def ensure_default_project() -> None:
+    # The frontend always opens project 1; recreate it if data/ was wiped.
+    from app.services import projects as project_store
+    project_store.ensure_default_project()
+    
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}

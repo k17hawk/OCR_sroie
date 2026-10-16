@@ -121,3 +121,25 @@ def update(project: Project, patch: dict[str, Any]) -> Project:
         _write_all(projects)
         return p
     raise KeyError(f"project {project.id} not found")
+
+DEFAULT_PROJECT_ID = 1
+
+
+def ensure_default_project() -> Project:
+    """Make sure project id=1 (the one the frontend uses) exists. Safe to call repeatedly."""
+    existing = get(DEFAULT_PROJECT_ID)
+    if existing is not None:
+        return existing
+    projects = _read_all()
+    taken = {p.name for p in projects}
+    name = "local" if "local" not in taken else f"local-{DEFAULT_PROJECT_ID}"
+    project = Project(
+        id=DEFAULT_PROJECT_ID,
+        name=name,
+        model_settings={"family": "mock", "device": "cpu"},
+        default_dpi=300,
+        default_language="ne",
+    )
+    projects.append(project)
+    _write_all(sorted(projects, key=lambda p: p.id))
+    return project
