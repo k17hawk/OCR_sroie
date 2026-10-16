@@ -1,19 +1,25 @@
-"""Auto text lines inside regions ("Detect lines").
+"""Text lines measured from the page image.
 
-For each text region, find the printed lines on the page image (horizontal
-bands of ink inside the region box) and match them, in order, to the
-region's text lines. Each match becomes one ``lines[]`` record whose box is
-the printed line, not the whole region.
+Line boxes are never placed by default (even strips, the block's width):
+every box comes from the ink on the scan.
 
-Works on the raw v2 page dict (the editor's JSON), so it can run on unsaved
-edits. Only the processed regions' lines are replaced; every other line
-(other regions, table lines) is left exactly as it was.
+``detect_lines(gray, bbox)`` makes two passes over the text pixels inside a
+box: a row projection finds each printed line (top, bottom), then a column
+projection inside THAT line's rows gives the line's own left / right edge.
+``ink_mask`` decides what counts as text: adaptive threshold (faded print
+still counts), minus long horizontal / vertical strokes (underlines, table
+borders, page frames) and specks.
+
+``detect_page_lines`` runs that over the text regions of a v2 page and
+matches the boxes, in order, to each region's text lines. When the counts
+differ it warns and leaves the region's lines alone instead of guessing.
 """
 from __future__ import annotations
 
 import re
 from typing import Any, Iterable, Optional
 
+import cv2
 import numpy as np
 
 from app.services.geometry import bbox_to_quad
@@ -50,49 +56,90 @@ def runs(mask: np.ndarray, gap: int = 3) -> list[tuple[int, int]]:
     return out
 
 
-def ink_bands(
-    gray: np.ndarray,
-    box: Iterable[float],
-    *,
-    inset: int = 0,
-    thresh: int = 140,
-    min_h: int = 12,
-    merge: int = 4,
-    pad: int = 6,
-    clip: bool = True,
-) -> list[list[int]]:
-    """Boxes of the printed lines inside ``box``, top to bottom.
+def ink_mask(gray_crop: np.ndarray, min_area: int = 12) -> np.ndarray:
+    """Text pixels = 1. Removes long ruling lines, underlines and specks."""
+    if gray_crop.size == 0:
+        return np.zeros(gray_crop.shape, np.uint8)
+    crop = np.ascontiguousarray(gray_crop, dtype=np.uint8)
+    b = cv2.adaptiveThreshold(255 - crop, 1, cv2.ADAPTIVE_THRESH_MEAN_C,
+                              cv2.THRESH_BINARY, 31, -10)
+    h, w = b.shape
+    # long horizontal / vertical strokes = rules, underlines, table borders -> not text
+    hor = cv2.morphologyEx(b, cv2.MORPH_OPEN,
+                           cv2.getStructuringElement(cv2.MORPH_RECT, (max(60, w // 3), 1)))
+    ver = cv2.morphologyEx(b, cv2.MORPH_OPEN,
+                           cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(60, h // 2))))
+    b = b & (1 - hor) & (1 - ver)
+    # drop specks (scan noise) smaller than a dot of text
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(b, connectivity=8)
+    keep = np.zeros(n, bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= min_area
+    return keep[lab].astype(np.uint8)
 
-    A pixel is ink when its gray value is < ``thresh``. A row with more than
-    one ink pixel belongs to a band; bands closer than ``merge`` px join,
-    bands shorter than ``min_h`` px are dropped (specks, underlines), and
-    each band is padded by ``pad`` px. With ``clip`` the result stays inside
-    ``box`` (a line never sticks out of its region).
-    """
+
+def _crop_box(gray: np.ndarray, bbox: Iterable[float], inset: int = 0) -> Optional[tuple[int, int, int, int]]:
     H, W = gray.shape[:2]
-    x0, y0, x1, y1 = [int(round(v)) for v in box]
-    x0, y0 = max(0, x0), max(0, y0)
-    x1, y1 = min(W, x1), min(H, y1)
-    ax0, ay0, ax1, ay1 = x0 + inset, y0 + inset, x1 - inset, y1 - inset
-    if ax1 <= ax0 or ay1 <= ay0:
+    x0, y0, x1, y1 = [int(round(v)) for v in bbox]
+    x0, y0 = max(0, x0 + inset), max(0, y0 + inset)
+    x1, y1 = min(W, x1 - inset), min(H, y1 - inset)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
+
+
+def _clip(box: list[int], to: Iterable[float]) -> list[int]:
+    cx0, cy0, cx1, cy1 = [int(round(v)) for v in to]
+    return [max(box[0], cx0), max(box[1], cy0), min(box[2], cx1), min(box[3], cy1)]
+
+
+def detect_lines(gray: np.ndarray, bbox: Iterable[float], min_h: int = 12, row_gap: int = 4,
+                 pad: int = 6, inset: int = 4) -> list[list[int]]:
+    """Printed-line boxes inside ``bbox``, top to bottom, each with its own x-extent.
+
+    Pass 1: rows with ink -> groups of rows (gaps <= ``row_gap`` bridged) =
+    one printed line; groups shorter than ``min_h`` are dropped. Pass 2:
+    columns with ink inside that line's rows -> its left / right edge.
+    Boxes are padded by ``pad`` and stay inside ``bbox``.
+    """
+    bbox = [int(round(v)) for v in bbox]
+    c = _crop_box(gray, bbox, inset)
+    if c is None:
         return []
-    sub = gray[ay0:ay1, ax0:ax1] < thresh
-    rows = sub.sum(1) > 1
-    bands = []
-    for a, b in runs(rows, gap=merge):
+    x0, y0, x1, y1 = c
+    m = ink_mask(gray[y0:y1, x0:x1])
+    lines = []
+    for a, b in runs(m.sum(1) > 1, row_gap):              # pass 1: rows
         if b - a + 1 < min_h:
             continue
-        cols = np.flatnonzero(sub[a:b + 1].any(0))
-        bx = [ax0 + int(cols.min()) - pad, ay0 + a - pad, ax0 + int(cols.max()) + 1 + pad, ay0 + b + 1 + pad]
-        if clip:
-            bx = [max(bx[0], x0), max(bx[1], y0), min(bx[2], x1), min(bx[3], y1)]
-        bands.append(bx)
-    return bands
+        cols = np.flatnonzero(m[a:b + 1].any(0))           # pass 2: columns of THIS line
+        box = [x0 + int(cols.min()) - pad, y0 + a - pad,
+               x0 + int(cols.max()) + 1 + pad, y0 + b + 1 + pad]
+        lines.append(_clip(box, bbox))
+    return lines
 
 
-def union(boxes: list[list[int]]) -> list[int]:
-    return [min(b[0] for b in boxes), min(b[1] for b in boxes),
-            max(b[2] for b in boxes), max(b[3] for b in boxes)]
+def snap_box_to_ink(gray: np.ndarray, bbox: Iterable[float], pad: int = 6,
+                    clip_to: Optional[Iterable[float]] = None) -> list[int]:
+    """Tighten a roughly drawn box to the ink inside it (snap after drawing).
+
+    Returns the box unchanged when it holds no text ink. ``clip_to`` (the
+    parent region) keeps the result inside it.
+    """
+    bbox = [int(round(v)) for v in bbox]
+    c = _crop_box(gray, bbox)
+    if c is None:
+        return bbox
+    x0, y0, x1, y1 = c
+    ys, xs = np.nonzero(ink_mask(gray[y0:y1, x0:x1]))
+    if xs.size == 0:
+        return bbox
+    H, W = gray.shape[:2]
+    box = [x0 + int(xs.min()) - pad, y0 + int(ys.min()) - pad,
+           x0 + int(xs.max()) + 1 + pad, y0 + int(ys.max()) + 1 + pad]
+    box = _clip(box, [0, 0, W, H])
+    if clip_to is not None:
+        box = _clip(box, clip_to)
+    return box if box[2] > box[0] and box[3] > box[1] else bbox
 
 
 # ---------------------------------------------------------------------------
@@ -146,30 +193,27 @@ def _line(text: str, box: list[int], rid: int, idx: int, is_heading: bool,
     return ln
 
 
-def _match(gray, el, box, texts, old, start, role=None, what="") -> tuple[list[dict], Optional[str]]:
-    """Lines for one box: one per printed line, or one for the whole box + a warning."""
+def _match(gray, el, box, texts, old, start, role=None, what="") -> tuple[Optional[list[dict]], Optional[str]]:
+    """One line per printed line inside ``box``, or ``(None, warning)`` when the counts differ."""
     rid = el["id"]
-    heading = el.get("type") == "heading"
-    bands = ink_bands(gray, box)
     if not texts:
         return [], None
-    if len(bands) == len(texts):
-        return [_line(t, b, rid, start + i, heading,
-                      carry=old[i] if len(old) == len(texts) else None, role=role)
-                for i, (t, b) in enumerate(zip(texts, bands))], None
-    one = _line(" ".join(texts), union(bands) if bands else [int(v) for v in box], rid, start, heading,
-                carry=old[0] if old else None, role=role)
-    warn = (f"block {rid}{what}: {len(texts)} text lines but {len(bands)} printed lines"
-            " — add line breaks")
-    return [one], warn
+    found = detect_lines(gray, box)
+    if len(found) != len(texts):
+        return None, (f"block {rid}{what}: {len(texts)} text lines but {len(found)} printed lines"
+                      " — add line breaks; lines left unchanged")
+    heading = el.get("type") == "heading"
+    return [_line(t, b, rid, start + i, heading,
+                  carry=old[i] if len(old) == len(texts) else None, role=role)
+            for i, (t, b) in enumerate(zip(texts, found))], None
 
 
 def _form_field_lines(gray, el, old) -> tuple[Optional[list[dict]], list[str]]:
     """Lines for every field's label and value box (role "label" / "value").
 
-    Returns ``(None, warnings)`` when a field's label and value are still one
-    copied box: there is no way to tell which printed line is which, and old
-    lines don't record their field, so the region's lines are left alone.
+    Returns ``(None, warnings)`` - the region's lines are left alone - when a
+    field's label and value are still one copied box (no way to tell which
+    printed line is which) or when any box's counts don't match.
     """
     rid = el["id"]
     fields = el.get("fields") or []
@@ -179,7 +223,7 @@ def _form_field_lines(gray, el, old) -> tuple[Optional[list[dict]], list[str]]:
     if shared:
         return None, [f"block {rid} field {k}: label and value share one box"
                       " — draw them separately; lines left unchanged" for k in shared]
-    out, warns = [], []
+    out, warns, ok = [], [], True
     for k, f in enumerate(fields):
         label, value = f.get("label") or {}, f.get("value") or {}
         parts = [("label", label)]
@@ -192,18 +236,21 @@ def _form_field_lines(gray, el, old) -> tuple[Optional[list[dict]], list[str]]:
             mine = [ln for ln in old if ln.get("role") == role]
             got, w = _match(gray, el, part["bbox"], texts, mine, len(out), role=role,
                             what=f" field {k} {role}")
-            out += got
-            if w:
+            if got is None:
+                ok = False
                 warns.append(w)
-    return out, warns
+            else:
+                out += got
+    return (out if ok else None), warns
 
 
-def detect_lines(
+def detect_page_lines(
     gray: np.ndarray, rec: dict[str, Any], region_ids: Optional[set[int]] = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Rebuild ``rec["lines"]`` for the text regions (all, or ``region_ids``).
 
-    Returns ``(rec, warnings)``; ``rec`` is changed in place.
+    Returns ``(rec, warnings)``; ``rec`` is changed in place. A region whose
+    text and printed lines don't match keeps its lines and gets a warning.
     """
     warnings: list[str] = []
     for el in rec.get("layout") or []:
@@ -219,8 +266,6 @@ def detect_lines(
         if el["type"] == "form_field":
             new, warns = _form_field_lines(gray, el, old)
             warnings += warns
-            if new is None:
-                continue
         else:
             texts = _texts(el, old)
             if not texts:
@@ -228,10 +273,8 @@ def detect_lines(
             new, w = _match(gray, el, el["bbox"], texts, old, 0)
             if w:
                 warnings.append(w)
-                if el["type"] == "list":
-                    # one record would lose which item each line belongs to
-                    warnings[-1] += " (list lines left unchanged)"
-                    continue
+        if new is None:
+            continue
 
         keep = [ln for ln in rec.get("lines") or []
                 if not (isinstance(ln, dict) and ln.get("block_id") == rid and not _is_table_line(ln))]

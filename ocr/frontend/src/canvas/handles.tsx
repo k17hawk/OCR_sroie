@@ -2,9 +2,10 @@ import { useRef, useState } from "react";
 import { Circle, Group, Line, Rect } from "react-konva";
 import type Konva from "konva";
 import { useStore } from "../store";
-import type { BBox, Quad } from "../types";
+import type { BBox, Doc, Quad } from "../types";
 import { resizeLayoutElement } from "../editor/commands";
 import { hitBridge } from "./hitBridge";
+import { lineParent, snapChildToInk } from "../editor/snapToInk";
 
 /**
  * A click (no drag) on a handle's grab circle is passed on to HitLayer, so
@@ -96,7 +97,8 @@ export function QuadHandlesFor({
   onChange,
 }: {
   quad: Quad;
-  onChange: (q: Quad) => void;
+  /** `alt`: Alt was held when the drag ended (child boxes: don't snap to ink) */
+  onChange: (q: Quad, mods: { alt: boolean }) => void;
 }) {
   const scale = useStore((s) => s.scale);
   const [preview, setPreview] = useState<Quad | null>(null);
@@ -147,7 +149,7 @@ export function QuadHandlesFor({
       // snap the dragged node onto where the handle belongs now
       const [hx, hy] = resetTo(final);
       e.target.position({ x: hx, y: hy });
-      onChange(final);
+      onChange(final, { alt: !!(e.evt as MouseEvent | undefined)?.altKey });
     }
   };
 
@@ -332,12 +334,19 @@ export function LineHandles({ lineIndex }: { lineIndex: number }) {
   return (
     <QuadHandlesFor
       quad={ln.quad as Quad}
-      onChange={(q) => edit((d) => {
-        const target = d.lines[lineIndex];
-        if (!target) return;
-        target.quad = q;
-        target.bbox = bboxOf(q);
-      })}
+      onChange={(q, { alt }) => {
+        edit((d) => {
+          const target = d.lines[lineIndex];
+          if (!target) return;
+          target.quad = q;
+          target.bbox = bboxOf(q);
+        });
+        // tighten to the text ink inside it (hold Alt to keep it as dragged)
+        void snapChildToInk(
+          { get: (d) => d.lines[lineIndex], parent: lineParent(lineIndex) },
+          bboxOf(q), alt,
+        );
+      }}
     />
   );
 }
@@ -396,26 +405,45 @@ export function FieldHandles({
     <>
       <QuadHandlesFor
         quad={field.label.quad as Quad}
-        onChange={(q) => edit((d) => {
-          const t = d.layout.find((x) => x.id === elementId);
-          if (!t || t.type !== "form_field") return;
-          t.fields[fieldIndex].label.quad = q;
-          t.fields[fieldIndex].label.bbox = bboxOf(q);
-        })}
+        onChange={(q, { alt }) => {
+          edit((d) => {
+            const t = d.layout.find((x) => x.id === elementId);
+            if (!t || t.type !== "form_field") return;
+            t.fields[fieldIndex].label.quad = q;
+            t.fields[fieldIndex].label.bbox = bboxOf(q);
+          });
+          void snapChildToInk({ get: (d) => fieldPart(d, elementId, fieldIndex, "label"), parent: regionBox(elementId) }, bboxOf(q), alt);
+        }}
       />
       {field.value && "quad" in field.value && (
         <QuadHandlesFor
           quad={field.value.quad as Quad}
-          onChange={(q) => edit((d) => {
-            const t = d.layout.find((x) => x.id === elementId);
-            if (!t || t.type !== "form_field") return;
-            const v = t.fields[fieldIndex].value;
-            if (!v || !("quad" in v)) return;
-            v.quad = q;
-            v.bbox = bboxOf(q);
-          })}
+          onChange={(q, { alt }) => {
+            edit((d) => {
+              const t = d.layout.find((x) => x.id === elementId);
+              if (!t || t.type !== "form_field") return;
+              const v = t.fields[fieldIndex].value;
+              if (!v || !("quad" in v)) return;
+              v.quad = q;
+              v.bbox = bboxOf(q);
+            });
+            void snapChildToInk({ get: (d) => fieldPart(d, elementId, fieldIndex, "value"), parent: regionBox(elementId) }, bboxOf(q), alt);
+          }}
         />
       )}
     </>
   );
 }
+
+/** A form field's label or value box (the value only when it has one). */
+function fieldPart(d: Doc, elementId: number, fieldIndex: number, part: "label" | "value") {
+  const t = d.layout.find((x) => x.id === elementId);
+  if (!t || t.type !== "form_field") return undefined;
+  const f = t.fields[fieldIndex];
+  if (!f) return undefined;
+  const p = part === "label" ? f.label : f.value;
+  return p && "bbox" in p ? (p as { bbox: BBox; quad?: Quad }) : undefined;
+}
+
+const regionBox = (id: number) => (d: Doc): BBox | undefined =>
+  d.layout.find((e) => e.id === id)?.bbox as BBox | undefined;

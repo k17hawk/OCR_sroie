@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { detectLines } from "../api";
 import { useStore } from "../store";
 
@@ -21,22 +21,46 @@ export function DetectLinesButton() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  // Typing a different number of lines makes the editor put placeholder
+  // strips over the region. Line boxes must come from the scan, so measure
+  // them a moment after the line count of the selected region changes.
+  const regionId = selection?.kind === "layout" ? selection.id : null;
+  const lineCount = useStore((s) =>
+    regionId == null || !s.doc
+      ? -1
+      : s.doc.lines.filter((ln: any) => ln.block_id === regionId && ln.table_index == null && ln.cell_id == null).length,
+  );
+  const last = useRef<{ id: number | null; n: number } | null>(null);
+  useEffect(() => {
+    const prev = last.current;
+    last.current = { id: regionId, n: lineCount };
+    if (!prev || prev.id !== regionId || prev.n === lineCount || lineCount <= 0) return;
+    const el = useStore.getState().doc?.layout.find((e) => e.id === regionId);
+    if (!el || !TEXT_TYPES.has(el.type)) return;
+    const t = setTimeout(() => void run("region", true), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionId, lineCount]);
+
   if (!doc) return null;
   const selected =
     selection?.kind === "layout" ? doc.layout.find((e) => e.id === selection.id) : undefined;
   const regionOk = !!selected && TEXT_TYPES.has(selected.type);
 
-  async function run(scope: "page" | "region") {
+  async function run(scope: "page" | "region", auto = false) {
     const sent = useStore.getState().doc;
     if (!sent) return;
+    const sel = useStore.getState().selection;
+    const target = sel?.kind === "layout" ? sel.id : null;
+    if (scope === "region" && target == null) return;
     setBusy(scope); setErr(null); setInfo(null); setWarnings([]);
     try {
       const r = await detectLines(sent.document_id, {
         doc: sent,
-        element_id: scope === "region" ? selected?.id ?? null : null,
+        element_id: scope === "region" ? target : null,
       });
       if (useStore.getState().doc !== sent) {
-        setErr("The page changed while lines were being detected — run it again.");
+        if (!auto) setErr("The page changed while lines were being detected — run it again.");
         return;
       }
       const before = sent.lines.length;
@@ -44,7 +68,11 @@ export function DetectLinesButton() {
         d.lines = r.record.lines;
       });
       setWarnings(r.warnings);
-      setInfo(`${r.record.lines.length} lines (was ${before}). Press Save to keep them.`);
+      setInfo(
+        r.warnings.length
+          ? null
+          : `${auto ? "Line boxes measured from the scan" : `${r.record.lines.length} lines (was ${before})`}. Press Save to keep them.`,
+      );
     } catch (e) {
       setErr(String(e));
     } finally {

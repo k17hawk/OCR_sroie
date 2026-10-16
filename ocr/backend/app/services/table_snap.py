@@ -21,7 +21,12 @@ import cv2
 import numpy as np
 
 from app.services.geometry import bbox_to_quad
-from app.services.lines import ink_bands, runs, union
+from app.services.lines import detect_lines, runs
+
+
+def union(boxes: list[list[int]]) -> list[int]:
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
 def _nfc(s: str) -> str:
@@ -236,7 +241,8 @@ def _snap_one(gray, rec, blk, html_override, log, info) -> None:
     rest = [ln for ln in rec.get("lines") or [] if ln.get("block_id") != bid]
     new_lines = []
     for c in cells:
-        bands = ink_bands(gray, c["bbox"], inset=9)
+        # same measurement as region lines; inset 9 keeps the cell borders out
+        bands = detect_lines(gray, c["bbox"], inset=9)
         texts = [x for x in c["text"].split("\n") if x.strip()]
         if not texts:
             if bands:

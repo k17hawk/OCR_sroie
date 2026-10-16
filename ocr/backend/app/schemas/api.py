@@ -230,3 +230,14 @@ class PageFixResponse(BaseModel):
     record: dict[str, Any]
     warnings: list[str]
     info: list[str] = []
+
+
+class SnapBoxRequest(BaseModel):
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    # the parent region: the snapped box never leaves it
+    clip_to: list[float] | None = Field(default=None, min_length=4, max_length=4)
+
+
+class SnapBoxResponse(BaseModel):
+    bbox: list[int]
+    changed: bool

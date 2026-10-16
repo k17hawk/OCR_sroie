@@ -36,9 +36,25 @@ def blank() -> np.ndarray:
 
 
 def ink(gray: np.ndarray, box) -> None:
-    """Paint a solid 'printed line' (any ink blob works for the band finder)."""
+    """Paint a solid block: a rule, a border, a speck or a bar."""
     x0, y0, x1, y1 = box
     gray[y0:y1, x0:x1] = 0
+
+
+def write(gray: np.ndarray, x: int, y: int, text: str, size: int = 28) -> list[int]:
+    """Render real text at (x, y) and return its ink box [x0, y0, x1, y1].
+
+    Line detection must see glyph-like ink: a long solid bar is (correctly)
+    treated as a rule or an underline and ignored.
+    """
+    from PIL import ImageDraw, ImageFont
+
+    before = gray.copy()
+    img = Image.fromarray(gray)
+    ImageDraw.Draw(img).text((x, y), text, fill=0, font=ImageFont.load_default(size=size))
+    gray[:] = np.asarray(img)
+    ys, xs = np.nonzero((gray < 128) & (before >= 128))   # only this text's ink
+    return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
 
 
 @pytest.fixture()
@@ -55,8 +71,11 @@ def pagestore(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DEVALABEL_STORAGE_ROOT", str(tmp_path))
     monkeypatch.setenv("DEVALABEL_STORAGE_BACKEND", "local")
+    from app.api.documents import _decode_gray
+
     get_settings.cache_clear()
     get_storage.cache_clear()
+    _decode_gray.cache_clear()
     from app.storage import doc_store
 
     def put(rec, gray=None):
@@ -71,3 +90,4 @@ def pagestore(tmp_path, monkeypatch):
     yield put
     get_settings.cache_clear()
     get_storage.cache_clear()
+    _decode_gray.cache_clear()

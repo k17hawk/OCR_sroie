@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.schemas.doc_v2 import Doc
 from app.services.table_snap import cells_to_html, parse_table_html, snap_tables
-from conftest import blank, ink, make_page
+from conftest import blank, ink, make_page, write
 
 XS = [100, 300, 500, 700]          # column rules
 YS = [100, 160, 300, 380]          # uneven rows: 60, 140, 80 px
@@ -26,8 +26,8 @@ def _scan():
         ink(g, (x - 1, YS[0] - 1, x + 2, YS[-1] + 2))
     ink(g, (299, YS[1] - 1, 302, YS[-1] + 2))      # x=300 only below the header: partial
     # two printed lines in cell r1c0
-    ink(g, (130, 185, 250, 205))
-    ink(g, (130, 235, 250, 255))
+    write(g, 130, 180, "line a", size=24)
+    write(g, 130, 230, "line b", size=24)
     # a Devanagari headline (shirorekha) in r1c1: long, horizontal, touches no rule
     ink(g, (320, 229, 480, 232))
     return g
@@ -141,3 +141,15 @@ def test_endpoint_rejects_a_non_table(pagestore):
     pagestore(_page(), _scan())
     r = TestClient(app).post("/documents/DOC-0001/snap-table", json={"element_id": 1})
     assert r.status_code == 422
+
+
+def test_cell_lines_follow_their_own_ink():
+    g = _scan()
+    a = write(g, 160, 264, "Ty", size=20)  # a short third line, indented, low in cell r1c0
+    rec, _, _ = snap_tables(g, _page(HTML.replace(r"a\nb", r"a\nb\nc")))
+    t = rec["tables"][0]
+    cell = _cell(t, 1, 0)
+    three = [ln for ln in rec["lines"] if ln.get("cell_id") == cell["id"]]
+    assert [ln["text"] for ln in three] == ["a", "b", "c"]
+    assert abs((three[2]["bbox"][0] + 6) - a[0]) <= 3 and abs((three[2]["bbox"][2] - 6) - a[2]) <= 3
+    assert all(cell["bbox"][0] <= ln["bbox"][0] and ln["bbox"][2] <= cell["bbox"][2] for ln in three)

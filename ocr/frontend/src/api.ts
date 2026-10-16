@@ -184,3 +184,18 @@ export const detectLines = (documentId: string, args: { doc: Doc; element_id?: n
 /** Put a table's cells on the ruling lines printed on the scan (unchanged + warning on a mismatch). */
 export const snapTable = (documentId: string, args: { doc: Doc; element_id: number; html?: string }) =>
   pageFix(documentId, "snap-table", args);
+
+/** Tighten a drawn / resized child box to the text ink inside it (kept inside `clip_to`). */
+export async function snapBox(
+  documentId: string,
+  bbox: [number, number, number, number],
+  clip_to?: [number, number, number, number] | null,
+): Promise<{ bbox: [number, number, number, number]; changed: boolean }> {
+  const r = await fetch(`/documents/${documentId}/snap-box`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bbox, clip_to: clip_to ?? null }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return await r.json();
+}

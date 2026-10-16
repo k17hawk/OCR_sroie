@@ -200,14 +200,14 @@ export function Stage() {
     }
   };
 
-  const onMouseUpStage = () => {
+  const onMouseUpStage = (e?: Konva.KonvaEventObject<MouseEvent>) => {
     if (isPanningRef.current) {
       isPanningRef.current = false;
       return;
     }
     if (tools.active) {
       const p = stageRef.current?.getPointerPosition();
-      if (p) tools.onPointerUp(screenToImage(p));
+      if (p) tools.onPointerUp(screenToImage(p), { alt: !!e?.evt?.altKey });
     }
   };
 

@@ -7,6 +7,7 @@ import { bboxFromQuad } from "../lib";
 import {
   addFormField, addLayoutElement, addLine,
 } from "../editor/commands";
+import { lineParent, snapChildToInk } from "../editor/snapToInk";
 
 type Pt = [number, number];
 
@@ -70,7 +71,7 @@ export function useDrawingTools() {
     setPreview({ mode: "box", points: [s, pt], bbox });
   }
 
-  function onPointerUp(pt: Pt) {
+  function onPointerUp(pt: Pt, mods: { alt: boolean } = { alt: false }) {
     if (!active) return;
     if (tool === "draw-quad") return;
     if (!start.current) return;
@@ -110,10 +111,15 @@ export function useDrawingTools() {
 
     if (tool === "line") {
       const parent = selection?.kind === "layout" ? selection.id : null;
+      let idx = -1;
       edit((d) => {
-        const idx = addLine(d, bbox, parent);
+        idx = addLine(d, bbox, parent);
         setSelection({ kind: "line", index: idx });
       });
+      // tighten the drawn box to the text ink inside it (hold Alt to skip)
+      if (idx >= 0) {
+        void snapChildToInk({ get: (d) => d.lines[idx], parent: lineParent(idx) }, bbox, mods.alt);
+      }
       return;
     }
 

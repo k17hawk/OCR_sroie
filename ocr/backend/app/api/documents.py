@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from functools import lru_cache
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException
@@ -18,6 +19,8 @@ from app.schemas.api import (
     OcrRegionRequest,
     OcrRegionResponse,
     PageFixRequest,
+    SnapBoxRequest,
+    SnapBoxResponse,
     PageFixResponse,
     StatusChange,
     TableOcrRequest,
@@ -27,7 +30,7 @@ from app.schemas.api import (
 from app.schemas.doc_v2 import Doc
 from app.services import annotations as ann_service
 from app.services import documents as doc_service
-from app.services.lines import TEXT_TYPES, detect_lines
+from app.services.lines import TEXT_TYPES, detect_page_lines, snap_box_to_ink
 from app.services.table_snap import snap_tables
 from app.services import projects as project_service
 from app.services import status as status_service
@@ -213,10 +216,19 @@ def ocr_table(document_id: str, body: TableOcrRequest) -> TableOcrResponse:
 # Geometry fixes that read the scan: detect lines, snap table
 # ---------------------------------------------------------------------------
 
-def _gray(row: doc_service.doc_store.DocumentRow) -> np.ndarray:
-    img = PILImage.open(BytesIO(get_storage().get(row.image_key)))
+@lru_cache(maxsize=4)
+def _decode_gray(image_key: str, sha256: str) -> np.ndarray:
+    """Grayscale scan, cached: snap-box runs on every mouse-up. ``sha256`` is
+    part of the key so a replaced image is decoded again."""
+    img = PILImage.open(BytesIO(get_storage().get(image_key)))
     img.load()
     gray = np.asarray(img.convert("L"))
+    gray.setflags(write=False)
+    return gray
+
+
+def _gray(row: doc_service.doc_store.DocumentRow) -> np.ndarray:
+    gray = _decode_gray(row.image_key, row.sha256)
     if (gray.shape[1], gray.shape[0]) != (row.doc.width, row.doc.height):
         raise HTTPException(
             409, f"image is {gray.shape[1]}x{gray.shape[0]} but the page says "
@@ -248,7 +260,7 @@ def detect_lines_endpoint(document_id: str, body: PageFixRequest) -> PageFixResp
         if el.get("type") not in TEXT_TYPES:
             warnings.append(f"block {body.element_id}: a {el.get('type')} has no text lines to detect")
         ids = {body.element_id}
-    rec, more = detect_lines(_gray(row), rec, ids)
+    rec, more = detect_page_lines(_gray(row), rec, ids)
     return PageFixResponse(record=rec, warnings=warnings + more)
 
 
@@ -269,3 +281,11 @@ def snap_table_endpoint(document_id: str, body: PageFixRequest) -> PageFixRespon
         raise HTTPException(422, "html needs element_id")
     rec, warnings, info = snap_tables(_gray(row), rec, body.element_id, body.html)
     return PageFixResponse(record=rec, warnings=warnings, info=info)
+
+
+@router.post("/{document_id}/snap-box", response_model=SnapBoxResponse)
+def snap_box_endpoint(document_id: str, body: SnapBoxRequest) -> SnapBoxResponse:
+    """Tighten a drawn / resized child box to the text ink inside it."""
+    row = _load(document_id)
+    box = snap_box_to_ink(_gray(row), body.bbox, clip_to=body.clip_to)
+    return SnapBoxResponse(bbox=box, changed=box != [int(round(v)) for v in body.bbox])
