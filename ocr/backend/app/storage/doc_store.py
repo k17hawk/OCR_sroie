@@ -32,6 +32,7 @@ from app.config import get_settings
 
 log = logging.getLogger(__name__)
 from app.schemas.doc_v2 import Doc
+from app.services.geometry import ensure_quads
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,8 @@ def read_doc_file(path: Path) -> Doc:
     except json.JSONDecodeError:
         first = next((ln for ln in text.splitlines() if ln.strip()), "")
         data = json.loads(first)
-    return Doc.model_validate(data)
+    # ensure_quads: old files may have missing or stale quads.
+    return Doc.model_validate(ensure_quads(data))
 
 
 def _meta_path(document_id: str) -> Path:
@@ -232,7 +234,6 @@ def load(document_id: str) -> DocumentRow | None:
         save(row)
 
     return row
-
 
 def delete(document_id: str) -> None:
     """Removes the document from the tool. A page stored in manual_annotation/

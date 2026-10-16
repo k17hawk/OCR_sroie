@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+
+from app.services.geometry import fix_quad
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +45,21 @@ class _Schema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_quad(cls, data: Any) -> Any:
+        """``quad`` is optional on input: when it is missing or no longer fits
+        ``bbox`` it is rebuilt from the bbox (see services/geometry.py). The
+        serialized output always carries a quad, so the v2 JSON shape is
+        unchanged."""
+        if (
+            isinstance(data, dict)
+            and "quad" in cls.model_fields and "bbox" in cls.model_fields
+        ):
+            data = dict(data)
+            fix_quad(data)
+        return data
 
     @model_serializer(mode="wrap")
     def _serialize_omit_none(self, handler: Any) -> Any:

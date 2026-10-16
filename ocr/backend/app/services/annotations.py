@@ -42,6 +42,7 @@ from app.schemas.doc_v2 import (
     FormFieldEntry, FormFieldLabel, LayoutElement, Line, ListItem,
     NormalFieldValue, Quality, RawLengths, RulingLine, Table, TableCell,
 )
+from app.services.geometry import ensure_quads
 from app.services.projects import Project
 from app.storage import doc_store
 
@@ -326,6 +327,8 @@ def _clean_payload(payload: dict[str, Any], row: doc_store.DocumentRow) -> dict[
         p["annotation"] = _keep(p["annotation"], Annotation)
 
     _fix_bboxes(p)
+    # After the bboxes are integers: rebuild missing / stale quads from them.
+    ensure_quads(p)
     return p
 
 
