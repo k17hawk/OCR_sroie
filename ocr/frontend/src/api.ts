@@ -159,6 +159,8 @@ export type { Table };
 export interface PageFixResponse {
   record: Doc;
   warnings: string[];
+  /** snap-table: one summary per table that was snapped */
+  info?: string[];
 }
 
 async function pageFix(
@@ -178,3 +180,7 @@ async function pageFix(
 /** One line record per printed line inside each text region (or just `element_id`). */
 export const detectLines = (documentId: string, args: { doc: Doc; element_id?: number | null }) =>
   pageFix(documentId, "detect-lines", args);
+
+/** Put a table's cells on the ruling lines printed on the scan (unchanged + warning on a mismatch). */
+export const snapTable = (documentId: string, args: { doc: Doc; element_id: number; html?: string }) =>
+  pageFix(documentId, "snap-table", args);

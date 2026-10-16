@@ -229,3 +229,4 @@ class PageFixRequest(BaseModel):
 class PageFixResponse(BaseModel):
     record: dict[str, Any]
     warnings: list[str]
+    info: list[str] = []

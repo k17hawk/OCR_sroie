@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ocrTable } from "../api";
+import { ocrTable, snapTable } from "../api";
 import { useStore } from "../store";
 import { ModelPicker } from "./ModelPicker";
 import { useOcrPrefs } from "../hooks/useOcrPrefs";
@@ -29,6 +29,7 @@ export function TableOcrButton({ documentId, tableElementId, quad }: Props) {
   const [busy, setBusy] = useState<null | "ocr" | "fit">(null);
   const [info, setInfo] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   function apply(table: any, sentHtml?: string) {
     useStore.getState().edit((d) => {
@@ -49,7 +50,7 @@ export function TableOcrButton({ documentId, tableElementId, quad }: Props) {
   }
 
   async function run() {
-    setBusy("ocr"); setErr(null); setInfo(null);
+    setBusy("ocr"); setErr(null); setInfo(null); setWarnings([]);
     try {
       const r = await ocrTable(documentId, { quad, family, device, lang_hint: lang });
       apply(r.table);
@@ -61,18 +62,39 @@ export function TableOcrButton({ documentId, tableElementId, quad }: Props) {
     }
   }
 
-  /** Keep the typed rows/columns/spans/text, move the cells onto the image's lines. */
+  /**
+   * Keep the typed rows/columns/spans/text and snap the cells onto the ruling
+   * lines printed on the scan. If the HTML's rows/columns don't match the
+   * printed grid the table is left as it is and the warning is shown.
+   */
   async function fit(auto = false) {
-    const st = useStore.getState();
-    const el = st.doc?.layout.find((e) => e.id === tableElementId) as any;
-    if (!st.doc || !el) return;
-    const html = tableText(st.doc, el);
+    const sent = useStore.getState().doc;
+    const el = sent?.layout.find((e) => e.id === tableElementId) as any;
+    if (!sent || !el) return;
+    const html = tableText(sent, el);
     if (!html.trim()) return;
-    setBusy("fit"); setErr(null); setInfo(null);
+    setBusy("fit"); setErr(null); setInfo(null); setWarnings([]);
     try {
-      const r = await ocrTable(documentId, { quad: el.quad, family, device, lang_hint: lang, html });
-      apply(r.table, html);
-      setInfo(`${auto ? "Fitted to image" : "Fitted"} · ${r.table.num_rows}×${r.table.num_cols} · ${r.table.cells.length} cells`);
+      const r = await snapTable(documentId, { doc: sent, element_id: tableElementId, html });
+      setWarnings(r.warnings);
+      if (!r.info?.length) return; // not snapped: table unchanged
+      if (useStore.getState().doc !== sent) {
+        if (!auto) setErr("The page changed while snapping — run it again.");
+        return;
+      }
+      const rec = r.record;
+      useStore.getState().edit((d) => {
+        const i = d.layout.findIndex((e) => e.id === tableElementId);
+        const j = rec.layout.findIndex((e) => e.id === tableElementId);
+        if (i < 0 || j < 0) return;
+        d.layout[i] = rec.layout[j];
+        d.tables = rec.tables;
+        d.lines = rec.lines;
+        d.ruling_lines = rec.ruling_lines;
+        d.blocks = rec.blocks;
+      });
+      const t = rec.tables[(rec.layout.find((e) => e.id === tableElementId) as any).table_index];
+      setInfo(`${auto ? "Snapped to scan" : "Snapped"} · ${t.num_rows}×${t.num_cols} · ${t.cells.length} cells`);
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -122,12 +144,19 @@ export function TableOcrButton({ documentId, tableElementId, quad }: Props) {
           "w-full rounded py-1 text-[11px] font-medium " +
           (busy ? "bg-slate-800 text-slate-500" : "bg-slate-700 text-white hover:bg-slate-600")
         }
-        title="Keep the rows, columns, spans and text of the Table HTML; move the cells onto the table's lines in the image"
+        title="Keep the rows, columns, spans and text of the Table HTML; snap the cells onto the ruling lines printed on the scan"
       >
-        {busy === "fit" ? "Fitting…" : "Fit cells to image"}
+        {busy === "fit" ? "Snapping…" : "Fit cells to scan"}
       </button>
       {info && <div className="text-[10px] text-emerald-400">{info}</div>}
       {err && <div className="break-words text-[10px] text-rose-400">{err}</div>}
+      {warnings.length > 0 && (
+        <ul className="space-y-0.5 text-[10px] text-amber-300">
+          {warnings.map((w, i) => (
+            <li key={i}>⚠ {w}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

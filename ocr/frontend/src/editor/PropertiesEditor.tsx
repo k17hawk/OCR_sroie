@@ -614,9 +614,11 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
           />
           <div className="mt-1 text-[10px] text-slate-500">
             Run table OCR: finds the cells and fills their text from the OCR
-            lines (replaces the current cells). Fit cells to image: keeps the
-            Table HTML you typed and moves its cells onto the lines in the
-            scan — done automatically when your HTML adds or removes cells.
+            lines (replaces the current cells). Fit cells to scan: keeps the
+            Table HTML you typed and snaps its cells onto the ruling lines
+            printed on the scan — done automatically when your HTML adds or
+            removes cells. If its rows / columns don't match the printed
+            table, the table is left as it is and a warning is shown.
           </div>
         </Section>
       )}

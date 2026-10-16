@@ -28,6 +28,7 @@ from app.schemas.doc_v2 import Doc
 from app.services import annotations as ann_service
 from app.services import documents as doc_service
 from app.services.lines import TEXT_TYPES, detect_lines
+from app.services.table_snap import snap_tables
 from app.services import projects as project_service
 from app.services import status as status_service
 from app.storage import get_storage
@@ -249,3 +250,22 @@ def detect_lines_endpoint(document_id: str, body: PageFixRequest) -> PageFixResp
         ids = {body.element_id}
     rec, more = detect_lines(_gray(row), rec, ids)
     return PageFixResponse(record=rec, warnings=warnings + more)
+
+
+@router.post("/{document_id}/snap-table", response_model=PageFixResponse)
+def snap_table_endpoint(document_id: str, body: PageFixRequest) -> PageFixResponse:
+    """Put the table's cells on the ruling lines printed on the scan.
+
+    When the HTML's rows / columns don't match the printed grid, the table
+    is returned unchanged with a warning.
+    """
+    row = _load(document_id)
+    rec = _page_record(row, body)
+    if body.element_id is not None:
+        el = _region(rec, body.element_id)
+        if el.get("type") != "table":
+            raise HTTPException(422, f"region {body.element_id} is a {el.get('type')}, not a table")
+    elif body.html is not None:
+        raise HTTPException(422, "html needs element_id")
+    rec, warnings, info = snap_tables(_gray(row), rec, body.element_id, body.html)
+    return PageFixResponse(record=rec, warnings=warnings, info=info)
