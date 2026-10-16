@@ -235,3 +235,4 @@ nepali_synth/
 !ocr/frontend/tsconfig.json
 !ocr/frontend/index.html
 ocr/frontend/tsconfig.tsbuildinfo
+*.patch
