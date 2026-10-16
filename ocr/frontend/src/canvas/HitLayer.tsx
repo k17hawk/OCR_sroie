@@ -30,12 +30,6 @@ const HALO = "rgba(255,255,255,0.95)";
 /** clicks closer than this (screen px) to the last click count as "same spot" */
 const SAME_SPOT_PX = 6;
 
-function quadBox(q: [number, number][]): BBox {
-  const xs = q.map((p) => p[0]);
-  const ys = q.map((p) => p[1]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-}
-
 /**
  * Area the click-catcher must cover: the page, grown to include every box.
  * Pages whose width/height are 0 or missing (or smaller than their boxes)
@@ -72,14 +66,18 @@ function collectItems(doc: Doc, layers: Record<string, boolean>): HitItem[] {
     if (el.type === "form_field" && show("formFields")) {
       el.fields.forEach((f: any, fi: number) => {
         const sel: Sel = { kind: "field", elementId: el.id, fieldIndex: fi };
-        items.push({
-          key: `field-${el.id}-${fi}`,
-          bbox: f.label.bbox,
-          role: "child",
-          layoutId: el.id,
-          selection: sel,
-          pad: 1,
-        });
+        // a label without its own box (typed, or a line / cell / region) has
+        // nothing to click here; its value area and option squares still do
+        if (f.label?.bbox) {
+          items.push({
+            key: `field-${el.id}-${fi}`,
+            bbox: f.label.bbox as BBox,
+            role: "child",
+            layoutId: el.id,
+            selection: sel,
+            pad: 1,
+          });
+        }
         if (f.value && "bbox" in f.value && f.value.bbox) {
           items.push({
             key: `fieldval-${el.id}-${fi}`,
@@ -90,12 +88,12 @@ function collectItems(doc: Doc, layers: Record<string, boolean>): HitItem[] {
             pad: 1,
           });
         }
-        if (f.value && "options" in f.value) {
-          f.value.options.forEach((opt: any, oi: number) => {
-            if (!opt.box_quad) return;
+        if (Array.isArray(f.options)) {
+          f.options.forEach((opt: any, oi: number) => {
+            if (!opt.box) return;
             items.push({
               key: `fieldopt-${el.id}-${fi}-${oi}`,
-              bbox: quadBox(opt.box_quad as any),
+              bbox: opt.box as BBox,
               role: "child",
               layoutId: el.id,
               selection: sel,

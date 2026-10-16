@@ -165,6 +165,41 @@ function fieldLine(f: any): string {
   return `${label} ${cleanText(f.value.text ?? "")}`.trim();
 }
 
+const FIELD_HOSTS = new Set(["form_field", "table", "list"]);
+
+/**
+ * One field in the current shape: label null | {text, bbox?, quad?,
+ * cell_id?, region_id?, line_id?}; value {text, bbox, quad, handwritten,
+ * empty, cell_id?}; checkbox answers in options[] (by line id).
+ */
+function normField(f: any): any {
+  let label: any = null;
+  if (f.label) {
+    label = { ...f.label, text: cleanText(f.label.text ?? "") };
+    if (label.bbox || label.quad) fixGeom(label);
+    else { delete label.bbox; delete label.quad; }
+  }
+  let value: any = null;
+  if (f.value && "options" in f.value) {
+    // old checkbox shape (only in files the server hasn't migrated yet)
+    const options = (f.value.options ?? []).map((o: any) => ({
+      text: cleanText(o.text), checked: !!o.checked,
+      box_quad: (o.box_quad ?? []).map((p: number[]) => [r1(p[0]), r1(p[1])]),
+      text_quad: (o.text_quad ?? []).map((p: number[]) => [r1(p[0]), r1(p[1])]),
+    }));
+    value = { text: checkboxText(options), options };
+  } else if (f.value) {
+    const text = cleanText(f.value.text);
+    value = { ...f.value, text, handwritten: !!f.value.handwritten, empty: text === "" };
+    fixGeom(value);
+  }
+  const out: any = { label, field_type: f.field_type ?? "text" };
+  if (typeof f.single_choice === "boolean") out.single_choice = f.single_choice;
+  out.value = value;
+  if (Array.isArray(f.options)) out.options = f.options.map((o: any) => ({ ...o }));
+  return out;
+}
+
 /** Sort rows top→bottom, then left→right within a row. */
 function readingSort<T>(arr: T[], box: (t: T) => BBox): T[] {
   const hs = arr.map((a) => box(a)[3] - box(a)[1]).sort((a, b) => a - b);
@@ -370,8 +405,9 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     const vals = orphans.filter((o) => FIELD_VALUE_KINDS.has(o.type));
     const fields = buildFields(labs, vals, warn);
     for (const f of fields) {
-      const srcEl = [...labs, ...vals].find((o) => o.bbox === f.label.bbox || o.bbox === f.value?.bbox);
-      const bbox = f.value ? union(f.label.bbox, f.value.bbox) : f.label.bbox;
+      const srcEl = [...labs, ...vals].find((o) => o.bbox === f.label?.bbox || o.bbox === f.value?.bbox);
+      const lb: BBox = f.label?.bbox ?? f.value.bbox;
+      const bbox = f.value ? union(lb, f.value.bbox) : lb;
       const ff: any = {
         id: srcEl?.id, type: "form_field", bbox, quad: quadOf(bbox),
         reading_order: srcEl?.reading_order ?? null, text: "", fields: [f],
@@ -436,25 +472,13 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       }));
       el.list_style = !parsed && el.list_style ? el.list_style : listStyleOf(el.items);
     }
+    if (el.type === "form_field" || (FIELD_HOSTS.has(el.type) && Array.isArray(el.fields))) {
+      el.fields = (el.fields ?? []).map(normField);
+    }
     if (el.type === "form_field") {
-      el.fields = (el.fields ?? []).map((f: any) => {
-        const label = { text: cleanText(f.label?.text ?? ""), bbox: f.label?.bbox, quad: f.label?.quad };
-        fixGeom(label);
-        let value: any = null;
-        if (f.value && "options" in f.value) {
-          const options = (f.value.options ?? []).map((o: any) => ({
-            text: cleanText(o.text), checked: !!o.checked,
-            box_quad: (o.box_quad ?? []).map((p: number[]) => [r1(p[0]), r1(p[1])]),
-            text_quad: (o.text_quad ?? []).map((p: number[]) => [r1(p[0]), r1(p[1])]),
-          }));
-          value = { text: checkboxText(options), options };
-        } else if (f.value) {
-          value = { text: cleanText(f.value.text), bbox: f.value.bbox, quad: f.value.quad, handwritten: !!f.value.handwritten };
-          fixGeom(value);
-        }
-        return { label, field_type: f.field_type ?? "text", value };
-      });
-      el.fields = readingSort(el.fields, (f: any) => f.label.bbox);
+      // fields with a label line / cell / region keep their order; only
+      // drawn boxes are sorted top-to-bottom
+      if (el.fields.every((f: any) => f.label?.bbox)) el.fields = readingSort(el.fields, (f: any) => f.label.bbox);
       if (el.fields.length) el.text = el.fields.map(fieldLine).join("\n");
       else warn({ id: el.id, level: "check", message: `form_field #${el.id} has no fields — draw its label/value with the Form field tool, or change its type.` });
     }
@@ -560,8 +584,13 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     if (LOCKED.has(el.type) || el.type === "figure") continue;
 
     if (el.type === "form_field") {
+      // lines drawn in the region (label / option words) are kept as drawn,
+      // with their ids; fields refer to them by id
+      const drawn = keptLines.filter((l) => l.block_id === el.id && l.id != null && (l.text ?? "").trim());
+      for (const l of drawn) outLines.push({ ...l, block_id: nid });
+      const drawnIds = new Set(drawn.map((l) => l.id));
       for (const f of el.fields) {
-        if (f.label.text) {
+        if (f.label?.text && f.label.bbox && !drawnIds.has(f.label.line_id)) {
           outLines.push(makeLine(f.label.text, f.label.bbox, f.label.quad, nid, false,
             { ...reuse(el.id, f.label.text, f.label.bbox), role: "label" }));
         }
@@ -583,6 +612,13 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       const t = outTables[el.table_index];
       for (const c of t?.cells ?? []) {
         if (c.empty) continue;
+        // lines drawn inside the cell (label / option words) are kept as drawn
+        const drawn = keptLines.filter((l) => l.block_id === el.id && l.cell_id === c.id && l.id != null
+          && (l.text ?? "").trim());
+        if (drawn.length) {
+          for (const l of drawn) outLines.push({ ...l, block_id: nid, table_index: el.table_index });
+          continue;
+        }
         // keep the tight text box OCR produced for this cell, if any
         const prev = keptLines.find((l) => l.block_id === el.id && l.cell_id === c.id && l.text === c.text);
         const base = prev
@@ -675,6 +711,13 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
         break;
       case "signature": base.signer = el.signer; break;
       case "stamp": base.stamp_text = cleanText(el.stamp_text); break;
+    }
+    if ((el.type === "table" || el.type === "list") && Array.isArray(el.fields) && el.fields.length) {
+      base.fields = el.fields;
+    }
+    // a label that is another region: that region's exported id
+    for (const f of base.fields ?? []) {
+      if (f.label?.region_id != null) f.label = { ...f.label, region_id: idMap.get(f.label.region_id) ?? f.label.region_id };
     }
     if (el.type !== "figure" && el.subtype != null) base.subtype = el.subtype;
     if (el.handwritten != null && !LOCKED.has(el.type)) base.handwritten = el.handwritten;
