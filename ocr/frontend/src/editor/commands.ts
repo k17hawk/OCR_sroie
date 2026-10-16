@@ -68,6 +68,66 @@ export function emptyTable(bbox: BBox): Table {
   };
 }
 
+/**
+ * A cell's text from ALL its lines: lines on one printed row joined by a
+ * space ("(ख) नविकरण गरिएको" + "छ" + "छैन"), rows joined by "\n". Also the
+ * cell's handwritten flag. Call after a line of the cell changes.
+ */
+export function syncCellFromLines(d: Doc, tableIndex: number, cellId: number): void {
+  const cell = d.tables[tableIndex]?.cells.find((c) => c.id === cellId);
+  if (!cell) return;
+  const mine = d.lines.filter((l) => l.table_index === tableIndex && l.cell_id === cellId);
+  if (!mine.length) return;
+  const cy = (l: Line) => (l.bbox[1] + l.bbox[3]) / 2;
+  const hs = mine.map((l) => l.bbox[3] - l.bbox[1]).sort((a, b) => a - b);
+  const tol = Math.max(4, hs[Math.floor(hs.length / 2)] / 2);
+  const rows: Line[][] = [];
+  for (const l of [...mine].sort((a, b) => cy(a) - cy(b))) {
+    const row = rows[rows.length - 1];
+    if (row && Math.abs(cy(l) - cy(row[0])) <= tol) row.push(l);
+    else rows.push([l]);
+  }
+  cell.text = rows
+    .map((r) => r.sort((a, b) => a.bbox[0] - b.bbox[0]).map((l) => l.text.trim()).filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join("\n");
+  cell.empty = cell.text === "";
+  cell.handwritten = mine.some((l) => l.handwritten === true);
+}
+
+/** The next line id; never reuses one (Doc.next_line_id). */
+export function takeLineId(d: Doc): number {
+  const used = d.lines.reduce((m, l) => (l.id != null && l.id > m ? l.id : m), -1);
+  const id = Math.max(used + 1, d.next_line_id ?? 0);
+  d.next_line_id = id + 1;
+  return id;
+}
+
+const NO_LINES = new Set(["logo", "figure", "stamp", "signature"]);
+const insideFrac = (a: BBox, b: BBox): number => {
+  const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const ar = Math.max(1, (a[2] - a[0]) * (a[3] - a[1]));
+  return (ix * iy) / ar;
+};
+
+/**
+ * Which region a newly drawn line belongs to: the selected region (or the
+ * region of the selected line / cell / field) when the box lies inside it,
+ * else the smallest region that holds the box. null = none (a new
+ * paragraph is made for it).
+ */
+export function lineParentFor(d: Doc, bbox: BBox, sel: Selection): number | null {
+  const holds = (el: LayoutElement | undefined) =>
+    !!el && !NO_LINES.has(el.type) && insideFrac(bbox, el.bbox) >= 0.6;
+  const fromSel = parentLayoutOf(d, sel);
+  const selected = d.layout.find((e) => e.id === fromSel);
+  if (holds(selected)) return selected!.id;
+  const area = (b: BBox) => (b[2] - b[0]) * (b[3] - b[1]);
+  const best = d.layout.filter(holds).sort((a, b) => area(a.bbox) - area(b.bbox))[0];
+  return best ? best.id : null;
+}
+
 export function addLine(d: Doc, bbox: BBox, blockId: number | null): number {
   const quad = quadFromBBox(bbox);
   let parentId = blockId;
@@ -75,14 +135,26 @@ export function addLine(d: Doc, bbox: BBox, blockId: number | null): number {
     parentId = addLayoutElement(d, "paragraph", bbox);
   }
   const line: Line = {
+    id: takeLineId(d),
     text: "",
     bbox, block_id: parentId,
     line_in_block: d.lines.filter((l) => l.block_id === parentId).length,
     is_heading: false,
-    font_size: Math.max(12, bbox[3] - bbox[1]),
+    font_size: Math.round(0.8 * (bbox[3] - bbox[1]) * 10) / 10,
     font_id: null,
     quad,
   };
+  // a line drawn in a table belongs to the cell it sits in
+  const parent = d.layout.find((e) => e.id === parentId) as any;
+  if (parent?.type === "table") {
+    const t = d.tables[parent.table_index];
+    const cell = t?.cells
+      .map((c) => ({ c, f: insideFrac(bbox, c.bbox) }))
+      .filter((x) => x.f >= 0.5)
+      .sort((a, b) => b.f - a.f)[0]?.c;
+    line.table_index = parent.table_index;
+    if (cell) line.cell_id = cell.id;
+  }
   d.lines.push(line);
   return d.lines.length - 1;
 }

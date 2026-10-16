@@ -5,7 +5,7 @@ import { useStore } from "../store";
 import type { BBox, Quad } from "../types";
 import { bboxFromQuad } from "../lib";
 import {
-  addFormField, addLayoutElement, addLine,
+  addFormField, addLayoutElement, addLine, lineParentFor,
 } from "../editor/commands";
 import { lineParent, snapChildToInk } from "../editor/snapToInk";
 
@@ -110,10 +110,11 @@ export function useDrawingTools() {
     }
 
     if (tool === "line") {
-      const parent = selection?.kind === "layout" ? selection.id : null;
       let idx = -1;
       edit((d) => {
-        idx = addLine(d, bbox, parent);
+        // the selected region, the region of the selected line / cell, or the
+        // region the box is drawn in — not a new paragraph every time
+        idx = addLine(d, bbox, lineParentFor(d, bbox, selection));
         setSelection({ kind: "line", index: idx });
       });
       // tighten the drawn box to the text ink inside it (hold Alt to skip)

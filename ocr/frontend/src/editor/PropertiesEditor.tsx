@@ -15,7 +15,7 @@ import {
   isReadingOrderLocked, addLayoutElement, syncListText, listItemsFromText,
   formFieldText, tableText, syncTable,
   afterListChange, attachToListItem, detachFromList, listChildCandidates,
-  autoAttachListChildren,
+  autoAttachListChildren, syncCellFromLines,
 } from "./commands";
 
 /** Types with no text of their own on the server: no generic text box. */
@@ -997,11 +997,8 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
           onChange={(v) => edit((d) => {
             const ln = d.lines[index];
             ln.text = v;
-            // a table line IS its cell's text: keep the cell in step
-            if (ln.table_index != null && ln.cell_id != null) {
-              const c = d.tables[ln.table_index]?.cells.find((x) => x.id === ln.cell_id);
-              if (c) { c.text = v; c.empty = v.trim() === ""; }
-            }
+            // a cell's text is made from all of its lines
+            if (ln.table_index != null && ln.cell_id != null) syncCellFromLines(d, ln.table_index, ln.cell_id);
           })}
           rows={3}
         />
@@ -1027,11 +1024,8 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
               const ln = d.lines[index];
               if (e.target.checked) ln.handwritten = true;
               else delete ln.handwritten;
-              // table line: the cell carries the same flag
-              if (ln.table_index != null && ln.cell_id != null) {
-                const c = d.tables[ln.table_index]?.cells.find((x) => x.id === ln.cell_id);
-                if (c) c.handwritten = e.target.checked;
-              }
+              // table line: the cell is handwritten if any of its lines is
+              if (ln.table_index != null && ln.cell_id != null) syncCellFromLines(d, ln.table_index, ln.cell_id);
             })}
           />
           <span className="text-slate-400">handwritten</span>
