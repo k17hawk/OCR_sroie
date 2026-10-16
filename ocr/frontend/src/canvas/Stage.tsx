@@ -235,7 +235,12 @@ export function Stage() {
           onMouseLeave={onMouseUpStage}
           onContextMenu={(e) => e.evt.preventDefault()}
           onClick={(e) => {
-            if (e.target === e.target.getStage()) {
+            // Only clear selection on empty-canvas clicks in select-type
+            // modes. While a drawing tool is active, the Stage's click fires
+            // right after the tool commits a shape — for Quad that commit
+            // happens on the 4th mousedown, so this used to wipe the new
+            // selection and leave the right panel empty.
+            if (!tools.active && e.target === e.target.getStage()) {
               setSelection(null);
             }
           }}
