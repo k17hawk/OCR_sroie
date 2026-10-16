@@ -618,10 +618,10 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
   ]);
   if (!LINE_BASED.has(el.type)) return;
 
-  // the text box shows one row per line; the region's own text joins them
-  // with a space, as in the reference pages (the server does the same)
+  // the text box shows one row per line; the region's text keeps them as
+  // rows ("\n"), as the server does — a new line is never turned into a space
   if (el.type !== "heading") {
-    el.text = newText.split("\n").map((t) => t.trim()).filter(Boolean).join(" ");
+    el.text = newText.split("\n").map((t) => t.trim()).filter(Boolean).join("\n");
   }
 
   let displayLines = newText.split("\n");
@@ -979,7 +979,9 @@ export function listItemsFromText(
       (last.children ??= []).push(unused[ci].id);
       unused.splice(ci, 1);
     } else if (items.length) {
-      items[items.length - 1].text += " " + raw.trim(); // wrapped line
+      // a printed line with no marker continues the item above it, on its
+      // own row: the "\n" is kept, never turned into a space
+      items[items.length - 1].text += "\n" + raw.trim();
     } else {
       items.push({ marker: "", level: 0, text: raw.trim() });
     }
@@ -1004,7 +1006,10 @@ export function listTextFromItems(items: ListItemData[], d?: Doc | null): string
   const out: string[] = [];
   for (const it of items) {
     const indent = "  ".repeat(Math.max(0, it.level || 0));
-    out.push(indent + (it.marker ? (it.marker === "•" ? "-" : it.marker) + " " : "") + (it.text ?? ""));
+    const [first, ...rest] = (it.text ?? "").split("\n");
+    out.push(indent + (it.marker ? (it.marker === "•" ? "-" : it.marker) + " " : "") + first);
+    // the item's further printed lines, under it
+    for (const part of rest) out.push(indent + "  " + part);
     for (const cid of it.children ?? []) {
       const t = childTextOf(d, cid);
       if (t) for (const part of t.split("\n")) out.push(indent + "  " + part);
@@ -1132,13 +1137,18 @@ export function syncListLines(d: Doc, listId: number): void {
 
   const fresh: any[] = [];
   items.forEach((it, i) => {
-    const want = lineText(it);
+    // an item printed on several lines has one line record per printed line
+    const parts = lineText(it).split("\n");
+    const want = parts.join(" ");
     const group = indexed
       ? old.filter((ln) => ln.item_index === i)
-      : old.length === items.length ? [old[i]] : old.filter((ln) => ln.text.trim() === want.trim());
+      : old.length === items.length ? [old[i]] : old.filter((ln) => parts.includes(ln.text.trim()) || ln.text.trim() === want.trim());
     const base = { block_id: listId, is_heading: false, list_level: it.level || 0, item_index: i };
     if (group.length && group.map((ln) => ln.text.trim()).join(" ") === want.trim()) {
       for (const ln of group) fresh.push({ ...ln, ...base });
+    } else if (group.length === parts.length && parts.length > 1) {
+      // same number of printed lines: each keeps its box, takes its row
+      group.forEach((ln, k) => fresh.push({ ...ln, ...base, text: parts[k] }));
     } else if (group.length) {
       const bbox = unionBox(group.map((ln) => ln.bbox));
       fresh.push({

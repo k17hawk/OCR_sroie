@@ -141,7 +141,9 @@ function listText(
   const out: string[] = [];
   for (const it of items) {
     const indent = "  ".repeat(it.level);
-    out.push(indent + (it.marker === "•" ? "-" : it.marker) + (it.marker ? " " : "") + it.text);
+    const [first, ...rest] = (it.text ?? "").split("\n");
+    out.push(indent + (it.marker === "•" ? "-" : it.marker) + (it.marker ? " " : "") + first);
+    for (const part of rest) out.push(indent + "  " + part);
     for (const cid of it.children ?? []) {
       const t = childText(cid);
       if (t) for (const part of t.split("\n")) out.push(indent + "  " + part);

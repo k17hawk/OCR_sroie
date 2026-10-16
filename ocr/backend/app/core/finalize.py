@@ -164,12 +164,12 @@ def finalize(doc: Doc) -> Doc:
             continue
 
         else:
-            # header, paragraph, signature_caption, footer
+            # header, paragraph, caption, footer, …
             block_lines = lines_by_block.get(el.id, [])
             if block_lines:
-                # wrapped lines of one region read as one text, joined by a
-                # space (as in the reference pages), not by a newline
-                el.text = " ".join(ln.text.strip() for ln in block_lines if ln.text.strip())
+                # one row per printed line: lines are joined by "\n", never
+                # by a space (spec section 5; the "\n" must survive a save)
+                el.text = "\n".join(ln.text.strip() for ln in block_lines if ln.text.strip())
             # else: no lines — keep el.text as typed by the human
 
     # ------------------------------------------------------------------

@@ -54,7 +54,11 @@ def serialize_list(
     for item in items:
         indent = "  " * item.level
         marker = "-" if item.marker in _BULLET_MARKERS else item.marker
-        out.append(f"{indent}{marker} {item.text}")
+        first, *rest = item.text.split("\n")
+        out.append(f"{indent}{marker} {first}")
+        # an item printed on several lines: its further lines under it
+        for part in rest:
+            out.append(f"{indent}  {part}")
         if child_text is not None:
             for cid in item.children or []:
                 text = child_text(cid)
