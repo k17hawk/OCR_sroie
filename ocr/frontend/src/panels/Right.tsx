@@ -14,6 +14,7 @@ import type { Doc, LayoutElement } from "../types";
 import { typeColor, prettyType } from "../hooks/useProjectTypes";
 import { PropertiesEditor } from "../editor/PropertiesEditor";
 import { DocTypePicker } from "../editor/DocTypePicker";
+import { DetectLinesButton } from "../editor/DetectLinesButton";
 
 const TABS: {
   id: "properties" | "tree" | "readingOrder" | "pageMeta" | "json";
@@ -52,7 +53,12 @@ export function RightPanel() {
 
       <div className="flex-1 overflow-y-auto p-3">
         {!doc && <div className="text-xs text-slate-500">Loading…</div>}
-        {doc && tab === "properties" && <PropertiesEditor doc={doc} />}
+        {doc && tab === "properties" && (
+          <>
+            <DetectLinesButton />
+            <PropertiesEditor doc={doc} />
+          </>
+        )}
         {doc && tab === "tree" && <TreePanel doc={doc} />}
         {doc && tab === "readingOrder" && <ReadingOrderPanel doc={doc} />}
         {doc && tab === "pageMeta" && <PageMetaPanel doc={doc} />}

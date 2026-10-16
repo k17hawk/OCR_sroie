@@ -213,3 +213,19 @@ class TableOcrResponse(BaseModel):
     family: str
     device: str
     model: str
+
+class PageFixRequest(BaseModel):
+    """Run a geometry fix on a page.
+
+    ``doc`` is the editor's current (possibly unsaved) page JSON; without it
+    the saved page is used. ``element_id`` limits the fix to one region.
+    """
+    doc: dict[str, Any] | None = None
+    element_id: int | None = None
+    # snap-table only: the table HTML as typed in the editor
+    html: str | None = None
+
+
+class PageFixResponse(BaseModel):
+    record: dict[str, Any]
+    warnings: list[str]

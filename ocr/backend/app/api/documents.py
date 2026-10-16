@@ -1,9 +1,11 @@
 """FastAPI router for /documents/*. File-backed; no SQL session."""
 from __future__ import annotations
 
+import copy
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException
+import numpy as np
 from PIL import Image as PILImage
 
 from app.core.validate import validate
@@ -15,6 +17,8 @@ from app.schemas.api import (
     DocumentRead,
     OcrRegionRequest,
     OcrRegionResponse,
+    PageFixRequest,
+    PageFixResponse,
     StatusChange,
     TableOcrRequest,
     TableOcrResponse,
@@ -23,6 +27,7 @@ from app.schemas.api import (
 from app.schemas.doc_v2 import Doc
 from app.services import annotations as ann_service
 from app.services import documents as doc_service
+from app.services.lines import TEXT_TYPES, detect_lines
 from app.services import projects as project_service
 from app.services import status as status_service
 from app.storage import get_storage
@@ -202,3 +207,45 @@ def ocr_table(document_id: str, body: TableOcrRequest) -> TableOcrResponse:
         table=table, family=body.family, device=body.device,
         model=getattr(adapters["table"], "name", body.family),
     )
+
+# ---------------------------------------------------------------------------
+# Geometry fixes that read the scan: detect lines, snap table
+# ---------------------------------------------------------------------------
+
+def _gray(row: doc_service.doc_store.DocumentRow) -> np.ndarray:
+    img = PILImage.open(BytesIO(get_storage().get(row.image_key)))
+    img.load()
+    gray = np.asarray(img.convert("L"))
+    if (gray.shape[1], gray.shape[0]) != (row.doc.width, row.doc.height):
+        raise HTTPException(
+            409, f"image is {gray.shape[1]}x{gray.shape[0]} but the page says "
+                 f"{row.doc.width}x{row.doc.height}",
+        )
+    return gray
+
+
+def _page_record(row: doc_service.doc_store.DocumentRow, body: PageFixRequest) -> dict:
+    return copy.deepcopy(body.doc) if body.doc is not None else row.doc.model_dump(mode="json")
+
+
+def _region(rec: dict, element_id: int) -> dict:
+    for el in rec.get("layout") or []:
+        if isinstance(el, dict) and el.get("id") == element_id:
+            return el
+    raise HTTPException(404, f"region {element_id} not found")
+
+
+@router.post("/{document_id}/detect-lines", response_model=PageFixResponse)
+def detect_lines_endpoint(document_id: str, body: PageFixRequest) -> PageFixResponse:
+    """One ``lines[]`` record per printed line inside each text region."""
+    row = _load(document_id)
+    rec = _page_record(row, body)
+    ids = None
+    warnings: list[str] = []
+    if body.element_id is not None:
+        el = _region(rec, body.element_id)
+        if el.get("type") not in TEXT_TYPES:
+            warnings.append(f"block {body.element_id}: a {el.get('type')} has no text lines to detect")
+        ids = {body.element_id}
+    rec, more = detect_lines(_gray(row), rec, ids)
+    return PageFixResponse(record=rec, warnings=warnings + more)

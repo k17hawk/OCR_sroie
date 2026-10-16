@@ -154,3 +154,27 @@ export async function ocrPage(
 }
 
 export type { Table };
+
+/** Result of a geometry fix that reads the scan (detect lines, snap table). */
+export interface PageFixResponse {
+  record: Doc;
+  warnings: string[];
+}
+
+async function pageFix(
+  documentId: string,
+  action: "detect-lines" | "snap-table",
+  args: { doc: Doc; element_id?: number | null; html?: string },
+): Promise<PageFixResponse> {
+  const r = await fetch(`/documents/${documentId}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return await r.json();
+}
+
+/** One line record per printed line inside each text region (or just `element_id`). */
+export const detectLines = (documentId: string, args: { doc: Doc; element_id?: number | null }) =>
+  pageFix(documentId, "detect-lines", args);
