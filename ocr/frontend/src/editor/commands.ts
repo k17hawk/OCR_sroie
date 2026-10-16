@@ -502,10 +502,24 @@ export function syncTable(d: Doc, elementId: number, opts: { ruling?: boolean } 
     const c = byId.get(cid);
     if (!c || !(c.text ?? "").trim()) continue;
     const inside = old.filter((ln) => inBox(center(ln.bbox), c.bbox));
+    // lines drawn in the cell (several words, or label / option roles) are
+    // kept as drawn — fields refer to them by id — and the cell text follows
+    if (inside.length > 1 || inside.some((ln) => ln.role)) {
+      // the automatic whole-cell line (made from the cell text, box = the
+      // cell) is replaced by the lines drawn in the cell, not kept beside them
+      const auto = (ln: any) => !ln.role && ln.bbox.every((v: number, k: number) => Math.abs(v - c.bbox[k]) <= 2);
+      const drawn = inside.filter((ln) => !auto(ln));
+      for (const ln of (drawn.length ? drawn : inside).sort((a, b) => (a.bbox[1] - b.bbox[1]) || (a.bbox[0] - b.bbox[0]))) {
+        fresh.push({ ...ln, id: ln.id ?? takeLineId(d), block_id: elementId, line_in_block: fresh.length,
+                     table_index: ti, cell_id: c.id });
+      }
+      continue;
+    }
     const one = inside.length === 1 ? inside[0] : null;
     const bbox: BBox = inside.length ? unionBox(inside.map((ln) => ln.bbox)) : c.bbox;
     const quad = one?.quad ?? (inside.length ? quadFromBBox(bbox) : c.quad);
     const line: any = {
+      id: one?.id ?? takeLineId(d),
       text: c.text,
       bbox,
       block_id: elementId,
@@ -521,6 +535,10 @@ export function syncTable(d: Doc, elementId: number, opts: { ruling?: boolean } 
     fresh.push(line);
   }
   replaceLines(d, mine, fresh);
+  // cells whose lines were kept: their text is made from those lines
+  for (const cid of new Set(fresh.filter((l) => l.role && l.cell_id != null).map((l) => l.cell_id as number))) {
+    syncCellFromLines(d, ti, cid);
+  }
 
   const hasRuling = d.ruling_lines.some((rl) => rl.table_index === ti);
   if (opts.ruling || !hasRuling) {
