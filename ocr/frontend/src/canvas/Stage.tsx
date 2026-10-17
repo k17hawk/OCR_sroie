@@ -15,7 +15,19 @@ import {
 } from "./layers";
 import { HitLayer } from "./HitLayer";
 import { PickMenu } from "./PickMenu";
+import { ZoomControls } from "./ZoomControls";
 import { useDrawingTools } from "./tools";
+import {
+  clampOffset,
+  fitView,
+  pageSize,
+  scrollBy,
+  wheelAction,
+  zoomAt,
+  zoomTo,
+  ZOOM_STEP,
+  type View,
+} from "./viewport";
 import {
   QuadHandles,
   LineHandles,
@@ -23,9 +35,6 @@ import {
   ExtraRegionHandles,
   FieldHandles,
 } from "./handles";
-
-const MIN_SCALE = 0.05;
-const MAX_SCALE = 8;
 
 export function Stage() {
   const doc = useStore((s) => s.doc);
@@ -73,34 +82,43 @@ export function Stage() {
     };
   }, []);
 
+  // Pages with width/height 0 or missing: fit to the boxes instead.
+  const page = doc ? pageSize(doc) : { w: 0, h: 0 };
+  const viewSize = { w: size.w, h: size.h };
+  const current: View = { scale, offset };
+  const apply = (v: View) => setViewport(v.scale, v.offset);
+  const centre = { x: size.w / 2, y: size.h / 2 };
+
+  const fit = () => {
+    const v = fitView(page, viewSize);
+    if (v) apply(v); // null: not measured yet
+  };
+  const zoomStep = (dir: 1 | -1, at = centre) =>
+    apply(zoomAt(current, dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP, at, page, viewSize));
+  const actualSize = (at = centre) => apply(zoomTo(current, 1, at, page, viewSize));
+
   useEffect(() => {
     if (!doc) return;
-    // Pages with width/height 0 or missing: fit to the boxes instead.
-    let pw = Number(doc.width) || 0;
-    let ph = Number(doc.height) || 0;
-    if (!pw || !ph) {
-      for (const el of doc.layout ?? []) {
-        pw = Math.max(pw, el.bbox[2]);
-        ph = Math.max(ph, el.bbox[3]);
-      }
-      for (const ln of doc.lines ?? []) {
-        pw = Math.max(pw, ln.bbox[2]);
-        ph = Math.max(ph, ln.bbox[3]);
-      }
-    }
-    if (!pw || !ph) return;
-    const pad = 40;
-    const sx = (size.w - pad * 2) / pw;
-    const sy = (size.h - pad * 2) / ph;
-    const fit = Math.min(sx, sy);
-    if (!Number.isFinite(fit) || fit <= 0) return; // not measured yet
-    const s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, fit));
-    setViewport(s, {
-      x: (size.w - pw * s) / 2,
-      y: (size.h - ph * s) / 2,
-    });
+    fit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitRequest, doc?.document_id, doc?.width, doc?.height, size.w, size.h]);
+
+  // Ctrl/⌘ + "+" / "-" zoom, Ctrl/⌘ + 0 fits the page ("back to size"),
+  // Ctrl/⌘ + 1 shows the scan at 100 %. Not while typing in a text box.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const k = e.key;
+      if (k === "+" || k === "=") { e.preventDefault(); zoomStep(1); }
+      else if (k === "-" || k === "_") { e.preventDefault(); zoomStep(-1); }
+      else if (k === "0") { e.preventDefault(); fit(); }
+      else if (k === "1") { e.preventDefault(); actualSize(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -128,28 +146,17 @@ export function Stage() {
     };
   }, [spaceDown]);
 
+  // Wheel / two-finger swipe scrolls the page (Shift + wheel: sideways);
+  // Ctrl / ⌘ + wheel and trackpad pinch zoom around the pointer.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
-    e.evt.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
-    const oldScale = scale;
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return;
-
-    const mouseX = (pointer.x - offset.x) / oldScale;
-    const mouseY = (pointer.y - offset.y) / oldScale;
-
-    const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const factor = 1.1;
-    const newScale = Math.max(
-      MIN_SCALE,
-      Math.min(MAX_SCALE, direction > 0 ? oldScale * factor : oldScale / factor),
-    );
-
-    setViewport(newScale, {
-      x: pointer.x - mouseX * newScale,
-      y: pointer.y - mouseY * newScale,
-    });
+    e.evt.preventDefault(); // no page scroll / browser zoom while over the canvas
+    const act = wheelAction(e.evt);
+    if (act.kind === "scroll") {
+      apply(scrollBy(current, act.dx, act.dy, page, viewSize));
+      return;
+    }
+    const pointer = stageRef.current?.getPointerPosition() ?? centre;
+    apply(zoomAt(current, act.factor, pointer, page, viewSize));
   };
 
   const isPanningRef = useRef(false);
@@ -161,7 +168,7 @@ export function Stage() {
   ];
 
   const onMouseDownStage = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const wantPan = spaceDown || e.evt.button === 1;
+    const wantPan = spaceDown || e.evt.button === 1 || (tool === "pan" && e.evt.button === 0);
     if (wantPan) {
       isPanningRef.current = true;
       const p = stageRef.current?.getPointerPosition();
@@ -187,9 +194,10 @@ export function Stage() {
       if (!p) return;
       const dx = p.x - panStartRef.current.x;
       const dy = p.y - panStartRef.current.y;
-      setViewport(scale, {
-        x: panStartRef.current.ox + dx,
-        y: panStartRef.current.oy + dy,
+      apply({
+        scale,
+        offset: clampOffset({ x: panStartRef.current.ox + dx, y: panStartRef.current.oy + dy },
+                            scale, page, viewSize),
       });
       return;
     }
@@ -211,7 +219,7 @@ export function Stage() {
     }
   };
 
-  const cursor = spaceDown
+  const cursor = spaceDown || tool === "pan"
     ? "grab"
     : tools.active
       ? "crosshair"
@@ -307,6 +315,15 @@ export function Stage() {
         </div>
       )}
       <PickMenu />
+      {doc && (
+        <ZoomControls
+          scale={scale}
+          onZoomIn={() => zoomStep(1)}
+          onZoomOut={() => zoomStep(-1)}
+          onFit={fit}
+          onActual={() => actualSize()}
+        />
+      )}
     </div>
   );
 }

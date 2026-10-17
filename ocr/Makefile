@@ -1,4 +1,4 @@
-.PHONY: seed schema check check-schema test typecheck
+.PHONY: seed schema check check-schema test test-frontend typecheck
 
 seed:
 	cd backend && python -m scripts.seed
@@ -8,13 +8,16 @@ schema:
 	cd backend && python -m scripts.gen_schema
 
 # One command that runs everything
-check: check-schema test typecheck
+check: check-schema test test-frontend typecheck
 
 check-schema:
 	cd backend && python -m scripts.gen_schema --check
 
 test:
 	cd backend && python -m pytest -p no:warnings
+
+test-frontend:
+	cd frontend && pnpm test
 
 typecheck:
 	cd frontend && npx tsc --noEmit -p .
