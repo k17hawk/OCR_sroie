@@ -234,6 +234,24 @@ function setFormFieldText(d: Doc, el: any, text: string): void {
   own.forEach((ln, i) => { ln.text = rows[i]; });
 }
 
+/**
+ * A region's text is its lines joined with "\n" (forms prompt 1b) — the
+ * same rule the server applies on save. Call it after a line of the region
+ * is deleted or its text edited, so the text box shows what will be saved
+ * (a deleted line's words no longer linger in the text and block the save).
+ * Tables are left to their cells; a region with no lines keeps its text.
+ */
+export function syncRegionTextFromLines(d: Doc, blockId: number): void {
+  const el = d.layout.find((e) => e.id === blockId) as any;
+  if (!el || el.type === "table" || !("text" in el)) return;
+  const rows = d.lines
+    .filter((ln) => ln.block_id === blockId && ln.cell_id == null)
+    .sort((a, b) => a.line_in_block - b.line_in_block)
+    .map((ln) => (ln.text ?? "").trim())
+    .filter(Boolean);
+  if (rows.length) el.text = rows.join("\n");
+}
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 

@@ -13,7 +13,7 @@ import {
   setElementText, resizeLayoutElement, emptyTable, parentLayoutOf,
   appendReadingOrder, removeFromReadingOrder, nextReadingOrder,
   isReadingOrderLocked, addLayoutElement, syncListText, listItemsFromText,
-  tableText, syncTable,
+  tableText, syncTable, syncRegionTextFromLines,
   afterListChange, attachToListItem, detachFromList, listChildCandidates,
   autoAttachListChildren, syncCellFromLines,
 } from "./commands";
@@ -998,6 +998,8 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
             ln.text = v;
             // a cell's text is made from all of its lines
             if (ln.table_index != null && ln.cell_id != null) syncCellFromLines(d, ln.table_index, ln.cell_id);
+            // …and a region's text from its lines
+            else syncRegionTextFromLines(d, ln.block_id);
           })}
           rows={3}
         />
@@ -1044,7 +1046,12 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
       </Section>
 
       <button
-        onClick={() => edit((d) => { d.lines.splice(index, 1); })}
+        onClick={() => edit((d) => {
+          const [gone] = d.lines.splice(index, 1);
+          if (!gone) return;
+          if (gone.table_index != null && gone.cell_id != null) syncCellFromLines(d, gone.table_index, gone.cell_id);
+          else syncRegionTextFromLines(d, gone.block_id);
+        })}
         className="w-full rounded bg-rose-900/50 py-1 text-[11px] text-rose-200 hover:bg-rose-800/60"
       >
         Delete line
