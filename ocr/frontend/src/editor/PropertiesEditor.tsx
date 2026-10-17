@@ -7,6 +7,7 @@ import {
   useProjectTypes, withCurrent, prettyType, typeColor,
 } from "../hooks/useProjectTypes";
 import { DevanagariTextarea } from "./DevanagariTextarea";
+import { detectRegionLines } from "./DetectLinesButton";
 import { OcrRegionButton } from "./OcrRegionButton";
 import { TableOcrButton } from "./TableOcrButton";
 import {
@@ -62,31 +63,69 @@ function DraftTextarea({
 function TextLinesMismatch({ doc, id, edit }: {
   doc: Doc; id: number; edit: (recipe: (d: Doc) => void) => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   const diff = textVsLines(doc, id);
   if (!diff) return null;
   const show = (t: string) => t.replace(/\n/g, " ⏎ ");
+  const textRows = diff.text.split("\n").length;
+  const lineRows = diff.lines.split("\n").length;
+  // more rows in the text than lines: printed rows have no line yet
+  const missingLines = textRows > lineRows;
+  const detect = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const w = await detectRegionLines(id);
+      setMsg(w.length ? w.join("\n") : null);
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const useLines = () => {
+    if (missingLines && !window.confirm(
+      `The text has ${textRows} rows but only ${lineRows} line(s). "Use the lines" deletes the ` +
+      `other ${textRows - lineRows} row(s) from the text. If they are printed, use "Detect lines" instead.\n\nDelete them?`,
+    )) return;
+    edit((d) => syncRegionTextFromLines(d, id));
+  };
+  const btn = "rounded px-2 py-1 hover:bg-amber-700 disabled:opacity-40 ";
   return (
     <div className="mt-2 rounded border border-amber-700 bg-amber-950/60 p-2 text-[11px] text-amber-100">
       <div className="mb-1 font-medium">The text and the lines differ — a save keeps the lines.</div>
       <div className="font-mono"><span className="text-amber-300">text : </span>{show(diff.text)}</div>
       <div className="font-mono"><span className="text-amber-300">lines: </span>{show(diff.lines)}</div>
-      <div className="mt-2 flex gap-2">
+      {missingLines && (
+        <div className="mt-1 text-amber-300">
+          {textRows - lineRows} row(s) of the text have no line. If they are printed, press Detect lines.
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
-          className="rounded bg-amber-800/70 px-2 py-1 hover:bg-amber-700"
-          title="The lines are right: make the text match them (what only the text has is dropped)"
-          onClick={() => edit((d) => syncRegionTextFromLines(d, id))}
-        >Use the lines</button>
+          disabled={busy}
+          className={btn + (missingLines ? "bg-teal-700 text-white hover:bg-teal-600" : "bg-amber-800/70")}
+          title="Measure one line per text row on the scan (keeps the existing lines' ids)"
+          onClick={() => void detect()}
+        >{busy ? "Detecting…" : "Detect lines"}</button>
         <button
           type="button"
           disabled={!diff.sameRows}
-          className="rounded bg-amber-800/70 px-2 py-1 hover:bg-amber-700 disabled:opacity-40"
+          className={btn + "bg-amber-800/70"}
           title={diff.sameRows
             ? "The text is right: copy each row of the text into its line"
-            : "Different number of rows: edit the lines, or run Detect lines"}
+            : "Different number of rows: use Detect lines"}
           onClick={() => edit((d) => textIntoLines(d, id))}
         >Copy text into lines</button>
+        <button
+          type="button"
+          className={btn + "bg-amber-800/70"}
+          title="The lines are right: make the text match them (what only the text has is dropped)"
+          onClick={useLines}
+        >Use the lines</button>
       </div>
+      {msg && <div className="mt-1 whitespace-pre-wrap text-amber-300">⚠ {msg}</div>}
     </div>
   );
 }

@@ -8,6 +8,20 @@ const TEXT_TYPES = new Set([
 ]);
 
 /**
+ * Detect lines for one region on the editor's current page and apply the
+ * result as one edit (undo works; still needs Save). Returns the warnings,
+ * or throws. Shared by the Detect lines panel and the text / lines notice.
+ */
+export async function detectRegionLines(regionId: number): Promise<string[]> {
+  const sent = useStore.getState().doc;
+  if (!sent) return [];
+  const r = await detectLines(sent.document_id, { doc: sent, element_id: regionId });
+  if (useStore.getState().doc !== sent) throw new Error("The page changed meanwhile — run it again.");
+  useStore.getState().edit((d) => { d.lines = r.record.lines; });
+  return r.warnings;
+}
+
+/**
  * "Detect lines": finds the printed lines on the scan inside each text
  * region and gives each one its own line box. Runs on the editor's current
  * (unsaved) page, so typed line breaks count; the result is an ordinary

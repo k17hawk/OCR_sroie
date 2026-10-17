@@ -246,6 +246,20 @@ def test_ambiguous_row_is_not_split():
                         " join them, or draw each with the Line tool; lines left unchanged"]
 
 
+def test_rows_with_no_line_get_lines_and_the_old_line_keeps_its_id():
+    """gov_005 header: 4 printed rows, text has all 4, only the first has a line."""
+    g = blank()
+    rows = ["Ministry of Labour", "Department of Safety", "Minbhawan, Kathmandu", "Governance form"]
+    for i, t in enumerate(rows):
+        write(g, 200, 120 + 50 * i, t)
+    hd = _region("\n".join(rows), rid=0, typ="header", bbox=[100, 100, 900, 330])
+    old = dict(_whole_block_line(rows[0], rid=0, bbox=[190, 112, 600, 160]), id=42)
+    rec, warnings = detect_page_lines(g, make_page(layout=[hd], lines=[old]))
+    assert warnings == []
+    assert [ln["text"] for ln in rec["lines"]] == rows
+    assert rec["lines"][0]["id"] == 42 and all("id" not in ln for ln in rec["lines"][1:])
+
+
 # ---------------------------------------------------------------------------
 # snap_box_to_ink
 # ---------------------------------------------------------------------------
