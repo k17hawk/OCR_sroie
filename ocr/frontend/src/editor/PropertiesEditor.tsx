@@ -13,7 +13,7 @@ import {
   setElementText, resizeLayoutElement, emptyTable, parentLayoutOf,
   appendReadingOrder, removeFromReadingOrder, nextReadingOrder,
   isReadingOrderLocked, addLayoutElement, syncListText, listItemsFromText,
-  tableText, syncTable, syncRegionTextFromLines,
+  tableText, syncTable, syncRegionTextFromLines, textVsLines, textIntoLines,
   afterListChange, attachToListItem, detachFromList, listChildCandidates,
   autoAttachListChildren, syncCellFromLines,
 } from "./commands";
@@ -51,6 +51,42 @@ function DraftTextarea({
         onChange={(v) => { setDraft(v); onChange(v); }}
         rows={rows}
       />
+    </div>
+  );
+}
+
+/**
+ * The stored text has something its lines don't (or the other way round).
+ * A save keeps the lines, so show both and let the annotator decide.
+ */
+function TextLinesMismatch({ doc, id, edit }: {
+  doc: Doc; id: number; edit: (recipe: (d: Doc) => void) => void;
+}) {
+  const diff = textVsLines(doc, id);
+  if (!diff) return null;
+  const show = (t: string) => t.replace(/\n/g, " ⏎ ");
+  return (
+    <div className="mt-2 rounded border border-amber-700 bg-amber-950/60 p-2 text-[11px] text-amber-100">
+      <div className="mb-1 font-medium">The text and the lines differ — a save keeps the lines.</div>
+      <div className="font-mono"><span className="text-amber-300">text : </span>{show(diff.text)}</div>
+      <div className="font-mono"><span className="text-amber-300">lines: </span>{show(diff.lines)}</div>
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          className="rounded bg-amber-800/70 px-2 py-1 hover:bg-amber-700"
+          title="The lines are right: make the text match them (what only the text has is dropped)"
+          onClick={() => edit((d) => syncRegionTextFromLines(d, id))}
+        >Use the lines</button>
+        <button
+          type="button"
+          disabled={!diff.sameRows}
+          className="rounded bg-amber-800/70 px-2 py-1 hover:bg-amber-700 disabled:opacity-40"
+          title={diff.sameRows
+            ? "The text is right: copy each row of the text into its line"
+            : "Different number of rows: edit the lines, or run Detect lines"}
+          onClick={() => edit((d) => textIntoLines(d, id))}
+        >Copy text into lines</button>
+      </div>
     </div>
   );
 }
@@ -498,6 +534,7 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
           {TEXT_HINT[el.type] && (
             <div className="mt-1 text-[10px] text-slate-500">{TEXT_HINT[el.type]}</div>
           )}
+          <TextLinesMismatch doc={doc} id={el.id} edit={edit} />
           {showingJoined && !TEXT_HINT[el.type] && (
             <div className="mt-1 text-[10px] text-slate-500">
               Showing text joined from {joinedFromLines} line

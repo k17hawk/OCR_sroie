@@ -257,3 +257,14 @@ def test_save_path_keeps_options_and_line_ids():
     row = SimpleNamespace(document_id=old_doc.document_id, image_key=old_doc.image, doc=old_doc)
     f = Doc.model_validate(_clean_payload(old, row)).layout[0].fields[0]
     assert f.value is None and len(f.options) == 2
+
+
+def test_doc_type_has_one_spelling():
+    """A8: "government form" and "government_form" are one doc type."""
+    from app.core.migrate import migrate
+    for old in ("government form", "Government-Form", " government  form "):
+        rec, warns = migrate(make_page(doc_type=old))
+        assert rec["doc_type"] == "government_form"
+        assert any(w.get("path") == "doc_type" for w in warns)
+    rec, warns = migrate(make_page(doc_type="government_form"))
+    assert rec["doc_type"] == "government_form" and not any(w.get("path") == "doc_type" for w in warns)

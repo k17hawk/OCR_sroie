@@ -29,6 +29,7 @@ for validation to report rather than given a placeholder box.
 from __future__ import annotations
 
 import copy
+import re
 import math
 from typing import Any
 
@@ -422,6 +423,18 @@ def _finish_fields(L: _Lines) -> None:
 # entry point
 # ---------------------------------------------------------------------------
 
+def _normalize_doc_type(rec: dict[str, Any], warns: list[Warning_]) -> None:
+    """A8: one spelling per doc type - lower case, words joined by "_"
+    ("government form" / "Government-Form" -> "government_form")."""
+    dt = rec.get("doc_type")
+    if not isinstance(dt, str):
+        return
+    new = re.sub(r"[\s\-]+", "_", dt.strip()).lower()
+    if new != dt:
+        rec["doc_type"] = new
+        _warn(warns, "doc_type", f"doc_type {dt!r} -> {new!r}", level="info")
+
+
 def migrate(rec: dict[str, Any]) -> tuple[dict[str, Any], list[Warning_]]:
     """Return an upgraded deep copy of ``rec`` and what was changed."""
     rec = copy.deepcopy(rec)
@@ -430,6 +443,7 @@ def migrate(rec: dict[str, Any]) -> tuple[dict[str, Any], list[Warning_]]:
         return rec, warns
 
     _map_region_types(rec, warns)
+    _normalize_doc_type(rec, warns)
     L = _Lines(rec)
     _assign_line_ids(L, warns)
     _convert_checkbox_values(L, warns)

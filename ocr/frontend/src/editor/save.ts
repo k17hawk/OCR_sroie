@@ -30,7 +30,7 @@ function describeTextLoss(x: Detail): string {
     `${x.where}: printed text would be lost — "${String(x.got ?? "")}" is in the text but in none of its lines.`,
     `   text : ${clip(x.before ?? "")}`,
     `   lines: ${clip(x.after ?? "") || "(no lines)"}`,
-    `   Fix the line that lacks it (or run Detect lines on this region), or remove it from the text if it is not printed.`,
+    `   Select the region: under its text box, "Use the lines" (not printed) or "Copy text into lines" (printed).`,
   ].join("\n");
 }
 

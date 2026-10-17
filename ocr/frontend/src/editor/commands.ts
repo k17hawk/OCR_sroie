@@ -267,6 +267,42 @@ function setFormFieldText(d: Doc, el: any, text: string): void {
  * (a deleted line's words no longer linger in the text and block the save).
  * Tables are left to their cells; a region with no lines keeps its text.
  */
+/**
+ * When a region's stored text and its lines disagree (e.g. a page saved by an
+ * older version, whose text was built from field labels), the save uses the
+ * lines and would drop what only the text has. The text box shows the lines,
+ * so the difference is invisible there; this reports it.
+ * null = they agree, or the region has no lines / is a table.
+ */
+export function textVsLines(d: Doc, blockId: number):
+  { text: string; lines: string; sameRows: boolean } | null {
+  const el = d.layout.find((e) => e.id === blockId) as any;
+  if (!el || el.type === "table" || typeof el.text !== "string") return null;
+  const rows = (t: string) => t.split("\n").map((r) => r.trim()).filter(Boolean);
+  const own = d.lines
+    .filter((ln) => ln.block_id === blockId && ln.cell_id == null)
+    .sort((a, b) => a.line_in_block - b.line_in_block)
+    .map((ln) => (ln.text ?? "").trim())
+    .filter(Boolean);
+  if (!own.length) return null;
+  const text = rows(el.text);
+  if (text.join("\n") === own.join("\n")) return null;
+  return { text: text.join("\n"), lines: own.join("\n"), sameRows: text.length === own.length };
+}
+
+/** Copy the region's text rows into its lines (same number of rows only). */
+export function textIntoLines(d: Doc, blockId: number): void {
+  const el = d.layout.find((e) => e.id === blockId) as any;
+  if (!el || typeof el.text !== "string") return;
+  const rows = el.text.split("\n").map((r: string) => r.trim()).filter(Boolean);
+  const own = d.lines
+    .filter((ln) => ln.block_id === blockId && ln.cell_id == null)
+    .sort((a, b) => a.line_in_block - b.line_in_block);
+  if (own.length !== rows.length) return;
+  own.forEach((ln, i) => { ln.text = rows[i]; });
+  el.text = rows.join("\n");
+}
+
 export function syncRegionTextFromLines(d: Doc, blockId: number): void {
   const el = d.layout.find((e) => e.id === blockId) as any;
   if (!el || el.type === "table" || !("text" in el)) return;

@@ -16,7 +16,8 @@ DEFAULT_DOC_TYPES: list[str] = [
     "bank_account_form", "citizenship", "national_id", "passport",
     "driving_license", "pan_card", "voter_id", "invoice", "receipt",
     "bank_cheque", "bank_statement", "marksheet", "certificate",
-    "land_ownership", "application_letter", "government_notice", "other",
+    "land_ownership", "application_letter", "government_notice", "government_form",
+    "other",
 ]
 
 DEFAULT_FIELD_TYPES: list[str] = [

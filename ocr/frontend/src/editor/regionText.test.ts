@@ -34,3 +34,42 @@ describe("region text follows its lines in the editor", () => {
     expect(d.layout[0].text).toContain("\n4");
   });
 });
+
+import { textIntoLines, textVsLines } from "./commands";
+
+const item18 = () => ({
+  layout: [{ id: 8, type: "form_field", bbox: [0, 0, 900, 140], reading_order: 0, quad: [], fields: [],
+             text: "१८. काममा खटिन चाहेको सम्भावित समय:\nमहिना देखि\nमहिना सम्म:" }],
+  lines: [
+    { id: 1, text: "१८. काममा खटिन चाहेको सम्भावित समय:", bbox: [0, 0, 600, 40], block_id: 8, line_in_block: 0,
+      is_heading: false, font_size: 20, font_id: null, quad: [] },
+    { id: 2, text: "महिना देखि", bbox: [0, 50, 300, 90], block_id: 8, line_in_block: 1,
+      is_heading: false, font_size: 20, font_id: null, quad: [] },
+    { id: 3, text: "महिना सम्म", bbox: [0, 100, 300, 140], block_id: 8, line_in_block: 2,
+      is_heading: false, font_size: 20, font_id: null, quad: [] },
+  ],
+  tables: [],
+}) as any;
+
+describe("text and lines that differ (gov_005 item १८)", () => {
+  it("is reported, with both sides", () => {
+    const diff = textVsLines(item18(), 8)!;
+    expect(diff.text.endsWith("महिना सम्म:")).toBe(true);
+    expect(diff.lines.endsWith("महिना सम्म")).toBe(true);
+    expect(diff.sameRows).toBe(true);
+  });
+
+  it("'Copy text into lines' puts the colon on the line", () => {
+    const d = item18();
+    textIntoLines(d, 8);
+    expect(d.lines[2].text).toBe("महिना सम्म:");
+    expect(textVsLines(d, 8)).toBeNull();
+  });
+
+  it("'Use the lines' drops it from the text", () => {
+    const d = item18();
+    syncRegionTextFromLines(d, 8);
+    expect(d.layout[0].text.endsWith("महिना सम्म")).toBe(true);
+    expect(textVsLines(d, 8)).toBeNull();
+  });
+});
