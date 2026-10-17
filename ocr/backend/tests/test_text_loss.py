@@ -102,6 +102,12 @@ def test_printed_chars_ignore_fill_in_marks():
     assert printed_chars("वडा नं.: ........, टोल: …… \t ☐ ✓ ✔ ____ \\t") == printed_chars("वडानं.:,टोल:")
 
 
+def test_fixing_a_typed_backslash_n_is_not_a_loss():
+    """gov_005 p2 item ४ had a typed "\\n" (backslash + n) in its text."""
+    typed = "४. स्थायी ठेगाना:\\nप्रदेश: लुम्बिनी"
+    assert printed_chars(typed) == printed_chars("४. स्थायी ठेगाना:\nप्रदेश: लुम्बिनी")
+
+
 def test_printed_chars_keep_real_dots():
     assert printed_chars("क्र. सं.")["."] == 2
 

@@ -194,6 +194,54 @@ def test_form_field_line_count_mismatch_leaves_lines_alone():
 
 
 # ---------------------------------------------------------------------------
+# several text rows on ONE printed row (gov_005 page 2 layouts)
+# ---------------------------------------------------------------------------
+
+ROW = [50, 300, 990, 370]   # the test page is 1000 px wide
+
+
+def test_side_by_side_lines_that_match_the_text_are_kept():
+    """Block 1: three label lines drawn side by side on one printed row."""
+    g = blank()
+    boxes = [write(g, 60, 315, "Pregnant:", 22), write(g, 330, 315, "months or after birth:", 22),
+             write(g, 850, 315, "months", 22)]
+    old = [dict(_whole_block_line(t, rid=1, bbox=[b[0] - 6, b[1] - 6, b[2] + 6, b[3] + 6], i=i),
+                id=126 + i, role="label")
+           for i, (t, b) in enumerate(zip(["Pregnant:", "months or after birth:", "months"], boxes))]
+    ff = _region("Pregnant:\nmonths or after birth:\nmonths", rid=1, typ="form_field", bbox=ROW)
+    rec, warnings = detect_page_lines(g, make_page(layout=[ff], lines=copy.deepcopy(old)))
+    assert warnings == []
+    assert rec["lines"] == old
+
+
+def test_one_printed_row_is_split_at_its_fill_in_gaps():
+    """Block 5: label, a dot leader, then the unit word - no lines yet."""
+    g = blank()
+    label = write(g, 60, 315, "7. Days employed", 22)
+    write(g, 320, 315, "......................", 22)      # the leader: not a word
+    unit = write(g, 880, 315, "days", 22)
+    ff = _region("7. Days employed\ndays", rid=5, typ="form_field", bbox=ROW)
+    rec, warnings = detect_page_lines(g, make_page(layout=[ff]))
+    assert warnings == []
+    first, second = rec["lines"]
+    assert (first["text"], second["text"]) == ("7. Days employed", "days")
+    # each box is measured from its own ink, not from the region
+    assert abs((first["bbox"][0] + PAD) - label[0]) <= 3 and abs((first["bbox"][2] - PAD) - label[2]) <= 3
+    assert abs((second["bbox"][0] + PAD) - unit[0]) <= 3 and abs((second["bbox"][2] - PAD) - unit[2]) <= 3
+
+
+def test_ambiguous_row_is_not_split():
+    """Ordinary word gaps only: which word goes in which row is a guess."""
+    g = blank()
+    write(g, 60, 315, "Province Lumbini District Rukum", 22)
+    ff = _region("Province Lumbini\nDistrict Rukum", rid=2, typ="form_field", bbox=ROW)
+    rec, warnings = detect_page_lines(g, make_page(layout=[ff]))
+    assert rec["lines"] == []
+    assert warnings == ["block 2: 2 text lines but 1 printed lines — rows that share one printed line:"
+                        " join them, or draw each with the Line tool; lines left unchanged"]
+
+
+# ---------------------------------------------------------------------------
 # snap_box_to_ink
 # ---------------------------------------------------------------------------
 

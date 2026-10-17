@@ -7,7 +7,7 @@ reports, per region, the characters that disappeared.
 
 What counts as printed: every character of a region's text, its lines,
 its table cells and its list items, EXCEPT fill-in marks and layout noise:
-dot / underscore leaders, tabs (also a literal "\\t"), ☐ ☑ ☒ ✓ ✔, and
+dot / underscore leaders, tabs (also a typed "\\t" or "\\n"), ☐ ☑ ☒ ✓ ✔, and
 whitespace. Markup that the old v2 format derived (table HTML tags, the
 "## " heading prefix, the "- " list bullet, "<figure/>") is not printed
 text either.
@@ -26,7 +26,7 @@ from typing import Any
 
 # leaders: any ellipsis run, 3+ dots (spaced or not), 2+ underscores, long dash runs
 _LEADER = re.compile(r"…+|\.(?:\s*[.…]){2,}|_{2,}|-{3,}|–{2,}|—{2,}")
-_MARKS = re.compile(r"[☐☑☒✓✔]|\\t")
+_MARKS = re.compile(r"[☐☑☒✓✔]|\\[tn]")  # a typed "\t" / "\n" is not printed text
 _SPACE = re.compile(r"\s+")
 _TAG = re.compile(r"<[^>]+>")
 _HEADING_MARK = re.compile(r"^\s*#+\s*")

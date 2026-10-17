@@ -119,6 +119,59 @@ def detect_lines(gray: np.ndarray, bbox: Iterable[float], min_h: int = 12, row_g
     return lines
 
 
+def split_row(gray: np.ndarray, row: Iterable[float], k: int, region: Iterable[float],
+              pad: int = 6, inset: int = 4) -> Optional[list[list[int]]]:
+    """Split ONE printed row into ``k`` side-by-side pieces, left to right, at
+    its ``k - 1`` widest blank gaps (the fill-in areas between a label and the
+    next printed word). Returns None unless those gaps are clearly wider than
+    every other gap in the row (at least one row height, and twice the widest
+    gap left over) — otherwise which word belongs to which piece is a guess.
+
+    Dot leaders don't close a gap: ink pieces smaller than a third of the
+    row height in both directions are ignored when looking for gaps. Each
+    piece's box is measured from its own ink.
+    """
+    if k < 2:
+        return None
+    c = _crop_box(gray, row, 0)
+    if c is None:
+        return None
+    x0, y0, x1, y1 = c
+    m = ink_mask(gray[y0:y1, x0:x1])
+    row_h = y1 - y0
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    small = max(3, row_h // 3)
+    big = np.zeros(n, bool)
+    big[1:] = (stats[1:, cv2.CC_STAT_WIDTH] > small) | (stats[1:, cv2.CC_STAT_HEIGHT] > small)
+    cols = big[lab].any(0)
+    ink_runs = runs(cols, 1)
+    if len(ink_runs) < k:
+        return None
+    gaps = sorted(((ink_runs[i + 1][0] - ink_runs[i][1] - 1, i) for i in range(len(ink_runs) - 1)),
+                  reverse=True)
+    chosen, rest = gaps[:k - 1], gaps[k - 1:]
+    widest_rest = rest[0][0] if rest else 0
+    if chosen[-1][0] < row_h or chosen[-1][0] < 2 * widest_rest:
+        return None
+    cuts = sorted(i for _, i in chosen)
+    near = max(2, row_h // 3)  # a colon / dot / matra next to a word belongs to it
+    pieces, start = [], 0
+    for i in cuts + [len(ink_runs) - 1]:
+        a, b = ink_runs[start][0], ink_runs[i][1]
+        for j in range(1, n):
+            if big[j]:
+                continue
+            cx0 = stats[j, cv2.CC_STAT_LEFT]
+            cx1 = cx0 + stats[j, cv2.CC_STAT_WIDTH] - 1
+            if cx1 >= ink_runs[start][0] - near and cx0 <= ink_runs[i][1] + near:
+                a, b = min(a, cx0), max(b, cx1)
+        ys = np.flatnonzero(m[:, a:b + 1].any(1))
+        box = [x0 + a - pad, y0 + int(ys.min()) - pad, x0 + b + 1 + pad, y0 + int(ys.max()) + 1 + pad]
+        pieces.append(_clip(box, region))
+        start = i + 1
+    return pieces
+
+
 def snap_box_to_ink(gray: np.ndarray, bbox: Iterable[float], pad: int = 6,
                     clip_to: Optional[Iterable[float]] = None) -> list[int]:
     """Tighten a roughly drawn box to the ink inside it (snap after drawing).
@@ -210,8 +263,22 @@ def _match(gray, el, box, texts, old, start, role=None, what="") -> tuple[Option
         return [], None
     found = detect_lines(gray, box)
     if len(found) != len(texts):
+        more_rows = len(texts) > len(found)
+        # lines drawn side by side on one printed row (label / option words)
+        # that already match the text: they are right as they are
+        if more_rows and [(ln.get("text") or "").strip() for ln in old] == texts:
+            return list(old), None
+        # one printed row holding several text rows: split it at its blank gaps
+        if more_rows and len(found) == 1:
+            pieces = split_row(gray, found[0], len(texts), box)
+            if pieces is not None:
+                found = pieces
+    if len(found) != len(texts):
+        hint = ("no printed text found inside the box — check the box" if not found else
+                "add line breaks" if len(texts) < len(found) else
+                "rows that share one printed line: join them, or draw each with the Line tool")
         return None, (f"block {rid}{what}: {len(texts)} text lines but {len(found)} printed lines"
-                      " — add line breaks; lines left unchanged")
+                      f" — {hint}; lines left unchanged")
     heading = el.get("type") == "heading"
     return [_line(t, b, rid, start + i, heading, carry=_carry_for(old, texts, i), role=role)
             for i, (t, b) in enumerate(zip(texts, found))], None
