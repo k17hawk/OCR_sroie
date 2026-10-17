@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -218,6 +219,8 @@ def test_one_printed_row_is_split_at_its_fill_in_gaps():
     """Block 5: label, a dot leader, then the unit word - no lines yet."""
     g = blank()
     label = write(g, 60, 315, "7. Days employed", 22)
+    ink(g, (label[2] + 2, 330, label[2] + 7, 335))         # a small mark next to the word (like a matra dot)
+    label = [label[0], label[1], label[2] + 7, label[3]]
     write(g, 320, 315, "......................", 22)      # the leader: not a word
     unit = write(g, 880, 315, "days", 22)
     ff = _region("7. Days employed\ndays", rid=5, typ="form_field", bbox=ROW)
@@ -225,6 +228,8 @@ def test_one_printed_row_is_split_at_its_fill_in_gaps():
     assert warnings == []
     first, second = rec["lines"]
     assert (first["text"], second["text"]) == ("7. Days employed", "days")
+    json.dumps(rec)  # plain Python numbers only (numpy ints broke the API response)
+    assert all(type(v) is int for ln in rec["lines"] for v in ln["bbox"])
     # each box is measured from its own ink, not from the region
     assert abs((first["bbox"][0] + PAD) - label[0]) <= 3 and abs((first["bbox"][2] - PAD) - label[2]) <= 3
     assert abs((second["bbox"][0] + PAD) - unit[0]) <= 3 and abs((second["bbox"][2] - PAD) - unit[2]) <= 3

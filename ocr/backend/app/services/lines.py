@@ -161,13 +161,13 @@ def split_row(gray: np.ndarray, row: Iterable[float], k: int, region: Iterable[f
         for j in range(1, n):
             if big[j]:
                 continue
-            cx0 = stats[j, cv2.CC_STAT_LEFT]
-            cx1 = cx0 + stats[j, cv2.CC_STAT_WIDTH] - 1
+            cx0 = int(stats[j, cv2.CC_STAT_LEFT])
+            cx1 = cx0 + int(stats[j, cv2.CC_STAT_WIDTH]) - 1
             if cx1 >= ink_runs[start][0] - near and cx0 <= ink_runs[i][1] + near:
                 a, b = min(a, cx0), max(b, cx1)
         ys = np.flatnonzero(m[:, a:b + 1].any(1))
         box = [x0 + a - pad, y0 + int(ys.min()) - pad, x0 + b + 1 + pad, y0 + int(ys.max()) + 1 + pad]
-        pieces.append(_clip(box, region))
+        pieces.append([int(v) for v in _clip(box, region)])  # plain ints: the box goes into JSON
         start = i + 1
     return pieces
 
