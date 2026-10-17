@@ -92,6 +92,92 @@
       "title": "Block",
       "type": "object"
     },
+    "CaptionLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "caption",
+          "default": "caption",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "CaptionLayout",
+      "type": "object"
+    },
     "CheckboxExtraRegion": {
       "additionalProperties": false,
       "properties": {
@@ -142,75 +228,82 @@
       "title": "CheckboxExtraRegion",
       "type": "object"
     },
-    "CheckboxFieldValue": {
+    "FieldOption": {
       "additionalProperties": false,
+      "description": "One choice of a checkbox field. Its word is the line ``line_id``\n(role \"option\"); the option itself never copies the text.\n\nTick area: a printed square (``box``) or a separate tick cell\n(``tick_cell_id``), or neither when the form shows none.",
       "properties": {
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "options": {
-          "items": {
-            "$ref": "#/$defs/CheckboxOption"
-          },
-          "title": "Options",
-          "type": "array"
-        }
-      },
-      "required": [
-        "text",
-        "options"
-      ],
-      "title": "CheckboxFieldValue",
-      "type": "object"
-    },
-    "CheckboxOption": {
-      "additionalProperties": false,
-      "properties": {
-        "text": {
-          "title": "Text",
-          "type": "string"
+        "line_id": {
+          "title": "Line Id",
+          "type": "integer"
         },
         "checked": {
-          "title": "Checked",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked"
+        },
+        "box": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Box"
         },
         "box_quad": {
-          "items": {
-            "items": {
-              "type": "number"
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
             },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Box Quad",
-          "type": "array"
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Box Quad"
         },
-        "text_quad": {
-          "items": {
-            "items": {
-              "type": "number"
+        "tick_cell_id": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Text Quad",
-          "type": "array"
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tick Cell Id"
         }
       },
       "required": [
-        "text",
-        "checked",
-        "box_quad",
-        "text_quad"
+        "line_id"
       ],
-      "title": "CheckboxOption",
+      "title": "FieldOption",
       "type": "object"
     },
     "FigureLayout": {
@@ -441,13 +534,35 @@
     },
     "FormFieldEntry": {
       "additionalProperties": false,
+      "description": "A question of a form_field, table or list region.\n\nCheckbox fields keep ``value`` null; the answer is ``options[].checked``.\n``label`` may be null only for a checkbox field (a choice group with no\nprinted question).",
       "properties": {
         "label": {
-          "$ref": "#/$defs/FormFieldLabel"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FormFieldLabel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "field_type": {
+          "default": "text",
           "title": "Field Type",
           "type": "string"
+        },
+        "single_choice": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Single Choice"
         },
         "value": {
           "anyOf": [
@@ -455,59 +570,115 @@
               "$ref": "#/$defs/NormalFieldValue"
             },
             {
-              "$ref": "#/$defs/CheckboxFieldValue"
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FieldOption"
+              },
+              "type": "array"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Value"
+          "title": "Options"
         }
       },
-      "required": [
-        "label",
-        "field_type"
-      ],
       "title": "FormFieldEntry",
       "type": "object"
     },
     "FormFieldLabel": {
       "additionalProperties": false,
+      "description": "The printed question of a field.\n\nWhere it is, at most one of:\n  * ``line_id``   — a label line of this region (text/bbox copied from it)\n  * ``cell_id``   — a cell of this region's table (may also have a bbox\n                    inside that cell, and a line_id)\n  * ``region_id`` — another region (e.g. a table_heading); no bbox\nor only ``text`` + ``bbox`` (a label drawn without a line).",
       "properties": {
         "text": {
+          "default": "",
           "title": "Text",
           "type": "string"
         },
         "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
         },
         "quad": {
-          "items": {
-            "items": {
-              "type": "number"
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
             },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quad"
+        },
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "line_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Id"
         }
       },
-      "required": [
-        "text",
-        "bbox",
-        "quad"
-      ],
       "title": "FormFieldLabel",
       "type": "object"
     },
@@ -603,178 +774,6 @@
         "quad"
       ],
       "title": "FormFieldLayout",
-      "type": "object"
-    },
-    "FormLabelLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "form_label",
-          "default": "form_label",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "FormLabelLayout",
-      "type": "object"
-    },
-    "FormValueLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "form_value",
-          "default": "form_value",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "FormValueLayout",
       "type": "object"
     },
     "HandwritingLayout": {
@@ -885,264 +884,6 @@
         "quad"
       ],
       "title": "HandwritingLayout",
-      "type": "object"
-    },
-    "HandwrittenAnnotationLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "handwritten_annotation",
-          "default": "handwritten_annotation",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "HandwrittenAnnotationLayout",
-      "type": "object"
-    },
-    "HandwrittenCorrectionLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "handwritten_correction",
-          "default": "handwritten_correction",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "HandwrittenCorrectionLayout",
-      "type": "object"
-    },
-    "HandwrittenNumberLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "handwritten_number",
-          "default": "handwritten_number",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "HandwrittenNumberLayout",
       "type": "object"
     },
     "HeaderLayout": {
@@ -1322,95 +1063,21 @@
       "title": "HeadingLayout",
       "type": "object"
     },
-    "LabelLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "label",
-          "default": "label",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "LabelLayout",
-      "type": "object"
-    },
     "Line": {
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
         "text": {
           "title": "Text",
           "type": "string"
@@ -1595,92 +1262,6 @@
       "title": "ListItem",
       "type": "object"
     },
-    "ListItemLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "list_item",
-          "default": "list_item",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "ListItemLayout",
-      "type": "object"
-    },
     "ListLayout": {
       "additionalProperties": false,
       "properties": {
@@ -1729,6 +1310,21 @@
           },
           "title": "Items",
           "type": "array"
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FormFieldEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
         },
         "parent_id": {
           "anyOf": [
@@ -1861,96 +1457,24 @@
       "title": "LogoLayout",
       "type": "object"
     },
-    "MixedTextLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "mixed_text",
-          "default": "mixed_text",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "MixedTextLayout",
-      "type": "object"
-    },
     "NormalFieldValue": {
       "additionalProperties": false,
+      "description": "Where the answer goes (a leader / blank / value cell) and what is\nwritten there. ``empty`` is derived: ``text == \"\"``.\n\nA pre-printed value points at its line (role \"value\"):\n``{line_id, text, bbox, handwritten: false, empty: false}`` (forms prompt 1b).",
       "properties": {
+        "line_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Id"
+        },
         "text": {
+          "default": "",
           "title": "Text",
           "type": "string"
         },
@@ -1978,189 +1502,33 @@
           "type": "array"
         },
         "handwritten": {
+          "default": false,
           "title": "Handwritten",
           "type": "boolean"
+        },
+        "empty": {
+          "default": true,
+          "title": "Empty",
+          "type": "boolean"
+        },
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell Id"
         }
       },
       "required": [
-        "text",
         "bbox",
-        "quad",
-        "handwritten"
+        "quad"
       ],
       "title": "NormalFieldValue",
-      "type": "object"
-    },
-    "OptionsLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "options",
-          "default": "options",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "OptionsLayout",
-      "type": "object"
-    },
-    "PageNumberLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "page_number",
-          "default": "page_number",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "PageNumberLayout",
       "type": "object"
     },
     "ParagraphLayout": {
@@ -2506,92 +1874,6 @@
         "bbox"
       ],
       "title": "RulingLine",
-      "type": "object"
-    },
-    "SignatureCaptionLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "signature_caption",
-          "default": "signature_caption",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "SignatureCaptionLayout",
       "type": "object"
     },
     "SignatureLayout": {
@@ -3036,92 +2318,6 @@
       "title": "TableCell",
       "type": "object"
     },
-    "TableFooterLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "table_footer",
-          "default": "table_footer",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "TableFooterLayout",
-      "type": "object"
-    },
     "TableHeadingLayout": {
       "additionalProperties": false,
       "properties": {
@@ -3250,6 +2446,21 @@
           "title": "Table Index",
           "type": "integer"
         },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FormFieldEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
         "parent_id": {
           "anyOf": [
             {
@@ -3297,92 +2508,6 @@
         "quad"
       ],
       "title": "TableLayout",
-      "type": "object"
-    },
-    "TextLineLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "type": {
-          "const": "text_line",
-          "default": "text_line",
-          "title": "Type",
-          "type": "string"
-        },
-        "bbox": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Bbox",
-          "type": "array"
-        },
-        "reading_order": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reading Order"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Id"
-        },
-        "parent_item": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Item"
-        },
-        "quad": {
-          "items": {
-            "items": {
-              "type": "number"
-            },
-            "maxItems": 2,
-            "minItems": 2,
-            "type": "array"
-          },
-          "maxItems": 4,
-          "minItems": 4,
-          "title": "Quad",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "bbox",
-        "text",
-        "quad"
-      ],
-      "title": "TextLineLayout",
       "type": "object"
     },
     "TitleLayout": {
@@ -3518,7 +2643,8 @@
         "devanagari",
         "dev",
         "latin",
-        "mixed"
+        "mixed",
+        "none"
       ],
       "title": "Digit Style",
       "type": "string"
@@ -3547,33 +2673,21 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "caption": "#/$defs/CaptionLayout",
             "figure": "#/$defs/FigureLayout",
             "footer": "#/$defs/FooterLayout",
             "form_field": "#/$defs/FormFieldLayout",
-            "form_label": "#/$defs/FormLabelLayout",
-            "form_value": "#/$defs/FormValueLayout",
             "handwriting": "#/$defs/HandwritingLayout",
-            "handwritten_annotation": "#/$defs/HandwrittenAnnotationLayout",
-            "handwritten_correction": "#/$defs/HandwrittenCorrectionLayout",
-            "handwritten_number": "#/$defs/HandwrittenNumberLayout",
             "header": "#/$defs/HeaderLayout",
             "heading": "#/$defs/HeadingLayout",
-            "label": "#/$defs/LabelLayout",
             "list": "#/$defs/ListLayout",
-            "list_item": "#/$defs/ListItemLayout",
             "logo": "#/$defs/LogoLayout",
-            "mixed_text": "#/$defs/MixedTextLayout",
-            "options": "#/$defs/OptionsLayout",
-            "page_number": "#/$defs/PageNumberLayout",
             "paragraph": "#/$defs/ParagraphLayout",
             "signature": "#/$defs/SignatureLayout",
-            "signature_caption": "#/$defs/SignatureCaptionLayout",
             "stamp": "#/$defs/StampLayout",
             "subheading": "#/$defs/SubheadingLayout",
             "table": "#/$defs/TableLayout",
-            "table_footer": "#/$defs/TableFooterLayout",
             "table_heading": "#/$defs/TableHeadingLayout",
-            "text_line": "#/$defs/TextLineLayout",
             "title": "#/$defs/TitleLayout"
           },
           "propertyName": "type"
@@ -3595,16 +2709,10 @@
             "$ref": "#/$defs/ParagraphLayout"
           },
           {
-            "$ref": "#/$defs/TextLineLayout"
-          },
-          {
             "$ref": "#/$defs/FooterLayout"
           },
           {
-            "$ref": "#/$defs/PageNumberLayout"
-          },
-          {
-            "$ref": "#/$defs/SignatureCaptionLayout"
+            "$ref": "#/$defs/CaptionLayout"
           },
           {
             "$ref": "#/$defs/FigureLayout"
@@ -3616,28 +2724,10 @@
             "$ref": "#/$defs/TableHeadingLayout"
           },
           {
-            "$ref": "#/$defs/TableFooterLayout"
-          },
-          {
             "$ref": "#/$defs/ListLayout"
           },
           {
-            "$ref": "#/$defs/ListItemLayout"
-          },
-          {
             "$ref": "#/$defs/FormFieldLayout"
-          },
-          {
-            "$ref": "#/$defs/FormLabelLayout"
-          },
-          {
-            "$ref": "#/$defs/FormValueLayout"
-          },
-          {
-            "$ref": "#/$defs/LabelLayout"
-          },
-          {
-            "$ref": "#/$defs/OptionsLayout"
           },
           {
             "$ref": "#/$defs/LogoLayout"
@@ -3650,18 +2740,6 @@
           },
           {
             "$ref": "#/$defs/HandwritingLayout"
-          },
-          {
-            "$ref": "#/$defs/HandwrittenAnnotationLayout"
-          },
-          {
-            "$ref": "#/$defs/HandwrittenCorrectionLayout"
-          },
-          {
-            "$ref": "#/$defs/HandwrittenNumberLayout"
-          },
-          {
-            "$ref": "#/$defs/MixedTextLayout"
           }
         ]
       },
@@ -3722,6 +2800,18 @@
     },
     "annotation": {
       "$ref": "#/$defs/Annotation"
+    },
+    "next_line_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Line Id"
     }
   },
   "required": [

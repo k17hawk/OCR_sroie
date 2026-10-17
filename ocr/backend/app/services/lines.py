@@ -30,7 +30,8 @@ TEXT_TYPES = frozenset({
 })
 
 # keys of an old line worth carrying over to the new line at the same index
-_CARRY = ("font_id", "role", "handwritten", "list_level", "item_index")
+# "id" too: fields reference lines by id, so a re-detected line keeps it
+_CARRY = ("id", "font_id", "role", "handwritten", "list_level", "item_index")
 
 _HEADING_MARK = re.compile(r"^\s*#+\s*")
 
@@ -159,10 +160,9 @@ def _own_lines(rec: dict[str, Any], rid: int) -> list[dict[str, Any]]:
 def _texts(el: dict[str, Any], old: list[dict[str, Any]]) -> list[str]:
     """The region's text, one entry per line.
 
-    The region ``text`` is split at "\\n" when it has line breaks. Saved
-    regions keep their text joined by spaces (finalize does that), so
-    otherwise the per-line texts come from the region's current lines -
-    which is what the editor's text box shows, one row per line.
+    The region ``text`` is split at "\\n" (finalize saves every region's
+    text as its lines joined with "\\n"). A one-line text falls back to the
+    region's current lines, which is what the editor's text box shows.
     """
     raw = el.get("text") or ""
     if "\n" in raw:
@@ -193,6 +193,16 @@ def _line(text: str, box: list[int], rid: int, idx: int, is_heading: bool,
     return ln
 
 
+def _carry_for(old: list[dict[str, Any]], texts: list[str], i: int) -> Optional[dict[str, Any]]:
+    """The old line whose id / role / font / handwriting the i-th new line
+    keeps: same position when the count is unchanged, else the old line
+    with the same text."""
+    if len(old) == len(texts):
+        return old[i]
+    want = texts[i].strip()
+    return next((ln for ln in old if (ln.get("text") or "").strip() == want), None)
+
+
 def _match(gray, el, box, texts, old, start, role=None, what="") -> tuple[Optional[list[dict]], Optional[str]]:
     """One line per printed line inside ``box``, or ``(None, warning)`` when the counts differ."""
     rid = el["id"]
@@ -203,45 +213,8 @@ def _match(gray, el, box, texts, old, start, role=None, what="") -> tuple[Option
         return None, (f"block {rid}{what}: {len(texts)} text lines but {len(found)} printed lines"
                       " — add line breaks; lines left unchanged")
     heading = el.get("type") == "heading"
-    return [_line(t, b, rid, start + i, heading,
-                  carry=old[i] if len(old) == len(texts) else None, role=role)
+    return [_line(t, b, rid, start + i, heading, carry=_carry_for(old, texts, i), role=role)
             for i, (t, b) in enumerate(zip(texts, found))], None
-
-
-def _form_field_lines(gray, el, old) -> tuple[Optional[list[dict]], list[str]]:
-    """Lines for every field's label and value box (role "label" / "value").
-
-    Returns ``(None, warnings)`` - the region's lines are left alone - when a
-    field's label and value are still one copied box (no way to tell which
-    printed line is which) or when any box's counts don't match.
-    """
-    rid = el["id"]
-    fields = el.get("fields") or []
-    shared = [k for k, f in enumerate(fields)
-              if isinstance((f.get("value") or None), dict) and (f.get("value") or {}).get("bbox")
-              and list((f.get("label") or {}).get("bbox") or []) == list(f["value"]["bbox"])]
-    if shared:
-        return None, [f"block {rid} field {k}: label and value share one box"
-                      " — draw them separately; lines left unchanged" for k in shared]
-    out, warns, ok = [], [], True
-    for k, f in enumerate(fields):
-        label, value = f.get("label") or {}, f.get("value") or {}
-        parts = [("label", label)]
-        if isinstance(value, dict) and value.get("bbox"):  # checkbox values have no box
-            parts.append(("value", value))
-        for role, part in parts:
-            if not part.get("bbox"):
-                continue
-            texts = [t.strip() for t in (part.get("text") or "").split("\n") if t.strip()]
-            mine = [ln for ln in old if ln.get("role") == role]
-            got, w = _match(gray, el, part["bbox"], texts, mine, len(out), role=role,
-                            what=f" field {k} {role}")
-            if got is None:
-                ok = False
-                warns.append(w)
-            else:
-                out += got
-    return (out if ok else None), warns
 
 
 def detect_page_lines(
@@ -263,16 +236,14 @@ def detect_page_lines(
             continue
         old = _own_lines(rec, rid)
 
-        if el["type"] == "form_field":
-            new, warns = _form_field_lines(gray, el, old)
-            warnings += warns
-        else:
-            texts = _texts(el, old)
-            if not texts:
-                continue
-            new, w = _match(gray, el, el["bbox"], texts, old, 0)
-            if w:
-                warnings.append(w)
+        # every region type, form_field included: lines come from the
+        # region's own printed text (fields only point at lines, never back)
+        texts = _texts(el, old)
+        if not texts:
+            continue
+        new, w = _match(gray, el, el["bbox"], texts, old, 0)
+        if w:
+            warnings.append(w)
         if new is None:
             continue
 

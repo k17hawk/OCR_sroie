@@ -153,8 +153,20 @@
     },
     "FieldValue": {
       "additionalProperties": false,
-      "description": "The answer area. A blank is {text: \"\", bbox, handwritten: false, empty: true}.",
+      "description": "The answer area.\nblank:       {text: \"\", bbox, handwritten: false, empty: true}\npre-printed: {line_id, text, bbox, handwritten: false, empty: false} — the\n             value line has role \"value\" (forms prompt 1b).",
       "properties": {
+        "line_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Id"
+        },
         "text": {
           "title": "Text",
           "type": "string"

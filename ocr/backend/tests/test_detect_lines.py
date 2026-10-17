@@ -160,29 +160,37 @@ def test_heading_marker_is_ignored():
     assert rec["lines"][0]["text"] == "Heading" and rec["lines"][0]["is_heading"] is True
 
 
-def test_form_field_lines_get_label_and_value_roles():
+def test_form_field_lines_come_from_region_text_not_fields():
+    """Bugfix: every printed line of a form_field gets a line record, even the
+    parts that are no field. The old label line keeps its id and role, so
+    label.line_id still points at it."""
     g = blank()
-    lab = write(g, 110, 310, "Name")
-    val = write(g, 340, 310, "Ram Bahadur")
-    ff = {"id": 3, "type": "form_field", "bbox": [100, 300, 900, 360], "text": "Name: Ram Bahadur",
-          "fields": [{"label": {"text": "Name", "bbox": [100, 300, 300, 360]}, "field_type": "text",
-                      "value": {"text": "Ram Bahadur", "bbox": [320, 300, 900, 360], "handwritten": False}}]}
-    rec, warnings = detect_page_lines(g, make_page(layout=[ff]))
+    write(g, 110, 310, "4. Permanent address:")
+    write(g, 110, 370, "Province: Lumbini, District: Rukum")
+    ff = {"id": 3, "type": "form_field", "bbox": [100, 300, 900, 420],
+          "text": "4. Permanent address:\nProvince: Lumbini, District: Rukum",
+          "fields": [{"label": {"text": "4. Permanent address:", "line_id": 7}, "field_type": "text",
+                      "value": None}]}
+    old = dict(_whole_block_line("4. Permanent address:", rid=3, bbox=[100, 300, 500, 350]),
+               id=7, role="label")
+    rec, warnings = detect_page_lines(g, make_page(layout=[ff], lines=[old]))
     assert warnings == []
-    assert [(ln["role"], ln["text"]) for ln in rec["lines"]] == [("label", "Name"), ("value", "Ram Bahadur")]
-    assert abs((rec["lines"][1]["bbox"][0] + PAD) - val[0]) <= 3
-    assert abs((rec["lines"][0]["bbox"][2] - PAD) - lab[2]) <= 3
+    assert [ln["text"] for ln in rec["lines"]] == ["4. Permanent address:",
+                                                   "Province: Lumbini, District: Rukum"]
+    first, second = rec["lines"]
+    assert (first["id"], first["role"]) == (7, "label")
+    assert "role" not in second and "id" not in second  # a new line: the save gives it an id
 
 
-def test_form_field_with_copied_boxes_is_left_alone():
+def test_form_field_line_count_mismatch_leaves_lines_alone():
     box = [100, 300, 900, 360]
-    old = dict(_whole_block_line("Name Ram", rid=3, bbox=box), role="label")
-    ff = {"id": 3, "type": "form_field", "bbox": box, "text": "Name: Ram",
+    old = dict(_whole_block_line("Name Ram", rid=3, bbox=box), id=4, role="label")
+    ff = {"id": 3, "type": "form_field", "bbox": box, "text": "Name:\nRam",
           "fields": [{"label": {"text": "Name", "bbox": box}, "field_type": "text",
                       "value": {"text": "Ram", "bbox": box, "handwritten": False}}]}
     rec, warnings = detect_page_lines(blank(), make_page(layout=[ff], lines=[copy.deepcopy(old)]))
     assert rec["lines"] == [old]
-    assert "share one box" in warnings[0]
+    assert "lines left unchanged" in warnings[0]
 
 
 # ---------------------------------------------------------------------------

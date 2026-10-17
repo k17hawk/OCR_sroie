@@ -43,6 +43,7 @@ from app.schemas.doc_v2 import (
     NormalFieldValue, Quality, RawLengths, RulingLine, Table, TableCell,
 )
 from app.core.migrate import migrate
+from app.core.textloss import find_text_loss
 from app.services.geometry import ensure_quads
 from app.services.projects import Project
 from app.storage import doc_store
@@ -446,6 +447,17 @@ def replace(
         raise HTTPException(422, detail=[{
             "loc": [], "where": "(finalize)", "msg": f"{type(e).__name__}: {e}", "type": "finalize_error",
         }]) from e
+
+    # Never write a page that lost printed text (forms prompt section 7).
+    lost = find_text_loss(payload, finalized.model_dump(mode="json"))
+    if lost:
+        log.warning("save blocked for %s: printed text would be lost:\n  %s", row.document_id,
+                    "\n  ".join(f"{x['where']}: {x['lost']!r}" for x in lost))
+        raise HTTPException(422, detail=[{
+            "loc": [], "where": x["where"], "type": "text_loss",
+            "msg": "printed text would be lost on save — add lines for it (Detect lines)",
+            "got": x["lost"], "region_id": x["region_id"], "before": x["before"], "after": x["after"],
+        } for x in lost])
 
     row.doc = finalized
     row.status = finalized.annotation.status

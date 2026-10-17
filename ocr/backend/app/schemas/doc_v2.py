@@ -133,9 +133,13 @@ class FieldOption(_Schema):
 
 class NormalFieldValue(_Schema):
     """Where the answer goes (a leader / blank / value cell) and what is
-    written there. ``empty`` is derived: ``text == ""``."""
-    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"cell_id"})
+    written there. ``empty`` is derived: ``text == ""``.
 
+    A pre-printed value points at its line (role "value"):
+    ``{line_id, text, bbox, handwritten: false, empty: false}`` (forms prompt 1b)."""
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"cell_id", "line_id"})
+
+    line_id: Optional[int] = None
     text: str = ""
     bbox: BBox
     quad: Quad

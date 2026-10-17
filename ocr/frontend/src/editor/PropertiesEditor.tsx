@@ -13,7 +13,7 @@ import {
   setElementText, resizeLayoutElement, emptyTable, parentLayoutOf,
   appendReadingOrder, removeFromReadingOrder, nextReadingOrder,
   isReadingOrderLocked, addLayoutElement, syncListText, listItemsFromText,
-  formFieldText, tableText, syncTable,
+  tableText, syncTable,
   afterListChange, attachToListItem, detachFromList, listChildCandidates,
   autoAttachListChildren, syncCellFromLines,
 } from "./commands";
@@ -61,7 +61,6 @@ function DraftTextarea({
 
 function elementText(el: LayoutElement, doc: Doc): string {
   // derived types: show the data the server actually keeps
-  if (el.type === "form_field") return formFieldText(el);
   if (el.type === "table") return tableText(doc, el);
   // a region made of OCR lines: one row per line, so editing keeps the lines
   // (its own text joins them with a space and would merge them into one)

@@ -340,12 +340,16 @@ export interface LabelRef {
   region_id?: number | null;
 }
 /**
- * The answer area. A blank is {text: "", bbox, handwritten: false, empty: true}.
+ * The answer area.
+ * blank:       {text: "", bbox, handwritten: false, empty: true}
+ * pre-printed: {line_id, text, bbox, handwritten: false, empty: false} — the
+ *              value line has role "value" (forms prompt 1b).
  *
  * This interface was referenced by `Doc`'s JSON-Schema
  * via the `definition` "FieldValue".
  */
 export interface FieldValue {
+  line_id?: number | null;
   text: string;
   /**
    * [x0, y0, x1, y1] integer pixels

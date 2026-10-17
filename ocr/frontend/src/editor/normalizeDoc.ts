@@ -160,13 +160,6 @@ function checkboxText(options: any[]): string {
   return options.map((o) => `[${o.checked ? "x" : " "}] ${o.text}`).join(" ");
 }
 
-function fieldLine(f: any): string {
-  const label = cleanText(f.label?.text ?? "");
-  if (!f.value) return label;
-  if ("options" in f.value) return `${label} ${checkboxText(f.value.options ?? [])}`.trim();
-  return `${label} ${cleanText(f.value.text ?? "")}`.trim();
-}
-
 const FIELD_HOSTS = new Set(["form_field", "table", "list"]);
 
 /**
@@ -481,8 +474,8 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       // fields with a label line / cell / region keep their order; only
       // drawn boxes are sorted top-to-bottom
       if (el.fields.every((f: any) => f.label?.bbox)) el.fields = readingSort(el.fields, (f: any) => f.label.bbox);
-      if (el.fields.length) el.text = el.fields.map(fieldLine).join("\n");
-      else warn({ id: el.id, level: "check", message: `form_field #${el.id} has no fields — draw its label/value with the Form field tool, or change its type.` });
+      // the region text is NOT rebuilt from fields (it is its lines: step 9b)
+      if (!el.fields.length) warn({ id: el.id, level: "check", message: `form_field #${el.id} has no fields — draw its label/value with the Form field tool, or change its type.` });
     }
     if (el.type !== "table" && /<table[\s>]/i.test(el.text ?? "")) {
       warn({ id: el.id, level: "check", message: `${el.type} #${el.id} contains table HTML — change its type to "table" and run Table OCR so it gets real cells.` });
@@ -586,27 +579,14 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     if (LOCKED.has(el.type) || el.type === "figure") continue;
 
     if (el.type === "form_field") {
-      // lines drawn in the region (label / option words) are kept as drawn,
-      // with their ids; fields refer to them by id
-      const drawn = keptLines.filter((l) => l.block_id === el.id && l.id != null && (l.text ?? "").trim());
-      for (const l of drawn) outLines.push({ ...l, block_id: nid });
-      const drawnIds = new Set(drawn.map((l) => l.id));
-      for (const f of el.fields) {
-        if (f.label?.text && f.label.bbox && !drawnIds.has(f.label.line_id)) {
-          outLines.push(makeLine(f.label.text, f.label.bbox, f.label.quad, nid, false,
-            { ...reuse(el.id, f.label.text, f.label.bbox), role: "label" }));
-        }
-        if (f.value && "options" in f.value) {
-          for (const o of f.value.options) {
-            if (!o.text || !o.text_quad?.length) continue;
-            const ob = bboxOfQuad(o.text_quad);
-            outLines.push(makeLine(o.text, ob, o.text_quad, nid, false,
-              { ...reuse(el.id, o.text, ob), role: "option" }));
-          }
-        } else if (f.value?.text) {
-          outLines.push(makeLine(f.value.text, f.value.bbox, f.value.quad, nid, false,
-            { ...reuse(el.id, f.value.text, f.value.bbox), role: "value", handwritten: f.value.handwritten }));
-        }
+      // its own lines, as drawn / detected, with their ids and roles. Line
+      // text is never made from fields: fields only reference lines.
+      const own = keptLines
+        .filter((x) => x.block_id === el.id && (x.text ?? "").trim())
+        .sort((a, b) => (a.line_in_block ?? 0) - (b.line_in_block ?? 0));
+      for (const l of own) {
+        const { __fromTextLine, ...rest } = l;
+        outLines.push({ ...rest, block_id: nid });
       }
       continue;
     }
@@ -670,6 +650,23 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     const n = counters.get(l.block_id) ?? 0;
     l.line_in_block = n;
     counters.set(l.block_id, n + 1);
+  }
+
+  // 9b. region text = its lines joined with "\n", for every region type
+  //     (forms prompt 1b). Regions without lines keep their own text.
+  {
+    const byBlock = new Map<number, string[]>();
+    for (const l of outLines) {
+      const t = (l.text ?? "").trim();
+      if (!t) continue;
+      if (!byBlock.has(l.block_id)) byBlock.set(l.block_id, []);
+      byBlock.get(l.block_id)!.push(t);
+    }
+    for (const el of layout) {
+      if (LOCKED.has(el.type)) continue;
+      const own = byBlock.get(el.__newId);
+      if (own?.length) el.text = own.join("\n");
+    }
   }
 
   // 10. checkbox extra regions mirror the form options; keep fingerprints

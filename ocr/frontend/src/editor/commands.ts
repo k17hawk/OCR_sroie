@@ -208,63 +208,30 @@ export function setReadingOrder(d: Doc, ids: number[]): void {
  * (figure, form_field, table, list, stamp) only have ``el.text`` updated.
  */
 // ---------------------------------------------------------------------------
-// Text for types whose text is derived (form fields, tables)
+// Text for types whose text is derived (tables)
 //
-// Form field: one line per field, "label: value".
-// Table:      the table's HTML (<tr>, <td>/<th>, rowspan, colspan);
-//             rows of cells separated by " | " also work.
+// Table: the table's HTML (<tr>, <td>/<th>, rowspan, colspan);
+//        rows of cells separated by " | " also work.
+//
+// A form_field is NOT derived: its text is its lines, like any text region.
 // ---------------------------------------------------------------------------
 
-/** What the generic text box shows for a form field. */
-export function formFieldText(el: any): string {
-  return (el.fields ?? [])
-    .map((f: FormFieldEntry) => {
-      const label = f.label?.text ?? "";
-      const v = f.value;
-      if (!v || f.field_type === "checkbox") return label;
-      const sep = label.trimEnd().endsWith(":") ? " " : ": ";
-      return `${label}${sep}${v.text ?? ""}`;
-    })
-    .join("\n");
-}
-
-function setFormFieldText(el: any, text: string): void {
-  if (!Array.isArray(el.fields)) el.fields = [];
-  const before = formFieldText(el).split("\n");
-  const rows = text.split("\n");
-  // a trailing empty line is just the cursor on a new line, not a field
-  while (rows.length > 1 && rows[rows.length - 1].trim() === "") rows.pop();
-  const n = rows.length;
-
-  rows.forEach((row, i) => {
-    // a line that wasn't changed leaves its field exactly as it was
-    if (el.fields[i] && row === before[i]) return;
-
-    // the label is what is typed up to and including the first ":"
-    const colon = row.indexOf(":");
-    const labelText = colon >= 0 ? row.slice(0, colon + 1) : row;
-    const valueText = colon >= 0 ? row.slice(colon + 1).trim() : null;
-
-    // A new field typed here gets its label text only: its boxes are drawn
-    // with the field tools, never guessed (no evenly split placeholder rows).
-    let f = el.fields[i] as FormFieldEntry | undefined;
-    if (!f) {
-      f = { label: { text: "" }, field_type: "text", value: null };
-      el.fields.push(f);
-    }
-    if (f.label) f.label.text = labelText.trim();
-    else f.label = { text: labelText.trim() };
-
-    const v = f.value;
-    if (f.field_type === "checkbox") return; // options are edited in the field panel
-    // a value is stored only where its value area was drawn
-    if (v) {
-      v.text = valueText ?? "";
-      v.empty = v.text === "";
-    }
-  });
-
-  if (el.fields.length > n) el.fields.splice(n);
+/**
+ * Typing into a form_field edits its printed text and lines — never its
+ * fields (fields only reference lines; forms prompt 1b). Lines are updated in
+ * place when the number of rows matches, so their ids, roles and boxes stay.
+ * Otherwise the lines are left alone: their boxes come from Detect lines,
+ * never from an evenly split region (if a save would then lose the typed
+ * text, the server blocks it and says so).
+ */
+function setFormFieldText(d: Doc, el: any, text: string): void {
+  const rows = text.split("\n").map((t) => t.trim()).filter(Boolean);
+  el.text = rows.join("\n");
+  const own = d.lines
+    .filter((ln) => ln.block_id === el.id && ln.cell_id == null)
+    .sort((a, b) => a.line_in_block - b.line_in_block);
+  if (own.length !== rows.length) return;
+  own.forEach((ln, i) => { ln.text = rows[i]; });
 }
 
 const escapeHtml = (s: string) =>
@@ -588,10 +555,10 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
   if (!el) return;
 
   // These types don't keep their own text on save: the server rebuilds it
-  // from fields / cells, or has no text field at all. Text typed into the
+  // from cells, or has no text field at all (form_field: see setFormFieldText). Text typed into the
   // generic text box (or filled by "OCR region") has to go into the data the
   // server keeps, or it is thrown away on the next save.
-  if (el.type === "form_field") { setFormFieldText(el, newText); return; }
+  if (el.type === "form_field") { setFormFieldText(d, el, newText); return; }
   if (el.type === "table") { setTableText(d, el, newText); return; }
   if (el.type === "stamp") { el.stamp_text = newText; return; }
   if (el.type === "figure" || el.type === "signature" || el.type === "logo") return;

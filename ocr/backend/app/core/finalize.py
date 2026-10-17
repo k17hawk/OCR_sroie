@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from app.core.geometry import bbox_from_quad
 from app.core.serialize import (
-    serialize_form_field,
     serialize_list,
     serialize_table_html,
 )
@@ -110,16 +109,42 @@ def _derive_digit_style(text: str, current: str) -> str:
 # finalize
 # ---------------------------------------------------------------------------
 
+def _lines_by_block(doc: Doc) -> dict[int, list[Line]]:
+    """Lines of each region, in reading order: table lines follow the
+    table's cell reading order, then ``line_in_block``; other regions by
+    ``line_in_block``. Lines with empty text are left out."""
+    cell_rank: dict[tuple[int, int], int] = {}
+    for ti, t in enumerate(doc.tables):
+        order = t.reading_order or [c.id for c in t.cells]
+        for rank, cid in enumerate(order):
+            cell_rank[(ti, cid)] = rank
+    out: dict[int, list[Line]] = {}
+    for ln in doc.lines:
+        if ln.text.strip():
+            out.setdefault(ln.block_id, []).append(ln)
+
+    def key(ln: Line) -> tuple[int, int]:
+        if ln.table_index is not None and ln.cell_id is not None:
+            return cell_rank.get((ln.table_index, ln.cell_id), 10**6), ln.line_in_block
+        return 0, ln.line_in_block
+
+    for bucket in out.values():
+        bucket.sort(key=key)
+    return out
+
+
+def region_text_from_lines(lines: list[Line]) -> str | None:
+    """A region's text: its lines joined with "\\n" (None when it has none)."""
+    texts = [ln.text.strip() for ln in lines if ln.text.strip()]
+    return "\n".join(texts) if texts else None
+
+
 def finalize(doc: Doc) -> Doc:
     """Recompute every derived field on a deep copy of ``doc`` and return it."""
     doc = doc.model_copy(deep=True)
 
-    # Index lines by block, ordered by ``line_in_block``.
-    lines_by_block: dict[int, list[Line]] = {}
-    for line in doc.lines:
-        lines_by_block.setdefault(line.block_id, []).append(line)
-    for bucket in lines_by_block.values():
-        bucket.sort(key=lambda ln: ln.line_in_block)
+    # Index lines by block, in reading order inside the block.
+    lines_by_block = _lines_by_block(doc)
     lines_by_id: dict[int, Line] = {ln.id: ln for ln in doc.lines if ln.id is not None}
 
     def _line_text(line_id: int) -> str | None:
@@ -129,48 +154,33 @@ def finalize(doc: Doc) -> Doc:
     # ------------------------------------------------------------------
     # 1) Recompute bbox + text on every layout element.
     #
-    # Rule: lines win when they exist; human-entered text survives when
-    # they don't. This lets an annotator type/paste text into an element
-    # that has no backing OCR lines (e.g. a region drawn over a bitmap
-    # label, or a heading whose line was deleted) without finalize
-    # silently blanking it.
+    # Rule (forms prompt 1b/5): a region's text is its lines joined with
+    # "\n", for EVERY region type. Region text and line text are never
+    # derived from fields — fields only point at lines. A region with no
+    # lines keeps the text the annotator typed (tables / lists without
+    # lines still fall back to their cells / items).
     # ------------------------------------------------------------------
     for el in doc.layout:
         # bbox from quad — always.
         el.bbox = bbox_from_quad(el.quad)
 
-        if isinstance(el, HeadingLayout):
-            block_lines = lines_by_block.get(el.id, [])
-            if block_lines:
-                el.text = "#" * el.level + " " + block_lines[0].text
-            # else: no lines — keep el.text as typed by the human
-
-        elif isinstance(el, FigureLayout):
-            el.text = "<figure/>"
-
-        elif isinstance(el, FormFieldLayout):
-            el.text = serialize_form_field(el.fields, _line_text)
-
-        elif isinstance(el, ListLayout):
-            pass  # after the loop: needs its children's final text
-
-        elif isinstance(el, TableLayout):
+        if isinstance(el, TableLayout):
             table = doc.tables[el.table_index]
             table.html = serialize_table_html(table.cells)
-            el.text = table.html
 
-        elif isinstance(el, LogoLayout):
-            # No ``text`` field on logos. Nothing to do.
+        if isinstance(el, LogoLayout) or not hasattr(el, "text"):
             continue
 
-        else:
-            # header, paragraph, caption, footer, …
-            block_lines = lines_by_block.get(el.id, [])
-            if block_lines:
-                # one row per printed line: lines are joined by "\n", never
-                # by a space (spec section 5; the "\n" must survive a save)
-                el.text = "\n".join(ln.text.strip() for ln in block_lines if ln.text.strip())
-            # else: no lines — keep el.text as typed by the human
+        own = region_text_from_lines(lines_by_block.get(el.id, []))
+        if own is not None:
+            el.text = own
+        elif isinstance(el, TableLayout):
+            el.text = doc.tables[el.table_index].html
+        elif isinstance(el, HeadingLayout) and not el.text.lstrip().startswith("#"):
+            el.text = "#" * el.level + " " + el.text
+        elif isinstance(el, FigureLayout) and not el.text:
+            el.text = "<figure/>"
+        # else: no lines — keep el.text as typed by the human (lists: below)
 
     # ------------------------------------------------------------------
     # 1b) Lists: items may own other boxes (a note, a figure, …) through
@@ -202,7 +212,7 @@ def finalize(doc: Doc) -> Doc:
         return getattr(child, "text", None) if child is not None else None
 
     for el in doc.layout:
-        if isinstance(el, ListLayout):
+        if isinstance(el, ListLayout) and el.id not in lines_by_block:
             el.text = serialize_list(el.items, _child_text)
 
     # ------------------------------------------------------------------

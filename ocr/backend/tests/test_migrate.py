@@ -218,8 +218,9 @@ def test_round_trip_is_stable():
 
 
 def test_form_text_lists_option_words_without_glyphs():
+    """Region text = its lines joined with "\\n" (never built from fields)."""
     doc = finalize(doc_from_record(_old_checkbox_page())[0])
-    assert doc.layout[0].text == "(ऊ) अपाङ्गता भएका सदस्य: (कुनै एकमा √ लगाउनुहोस्) छ छैन"
+    assert doc.layout[0].text == "(ऊ) अपाङ्गता भएका सदस्य: (कुनै एकमा √ लगाउनुहोस्)\nछ\nछैन"
 
 
 def test_checkbox_list_without_question_is_valid():

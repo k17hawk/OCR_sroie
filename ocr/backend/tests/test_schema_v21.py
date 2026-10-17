@@ -179,6 +179,13 @@ def test_blank_value_shape():
         s.FieldValue(text="", bbox=_box(), handwritten=False)  # empty is required
 
 
+def test_preprinted_value_points_at_its_line():
+    v = s.FieldValue(line_id=3, text="लुम्बिनी", bbox=_box(), handwritten=False, empty=False)
+    assert list(v.model_dump()) == ["line_id", "text", "bbox", "handwritten", "empty"]
+    assert "line_id" not in s.FieldValue(text="", bbox=_box(), handwritten=False,
+                                         empty=True).model_dump()
+
+
 # --- A8 page conventions ----------------------------------------------------
 
 @pytest.mark.parametrize("ok", ["dev", "latin", "mixed", "none"])

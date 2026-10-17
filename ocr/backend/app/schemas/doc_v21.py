@@ -110,7 +110,13 @@ class FieldOption(_Schema):
 
 
 class FieldValue(_Schema):
-    """The answer area. A blank is {text: "", bbox, handwritten: false, empty: true}."""
+    """The answer area.
+    blank:       {text: "", bbox, handwritten: false, empty: true}
+    pre-printed: {line_id, text, bbox, handwritten: false, empty: false} — the
+                 value line has role "value" (forms prompt 1b)."""
+    _OMIT_IF_NONE: ClassVar[frozenset[str]] = frozenset({"line_id"})
+
+    line_id: Optional[int] = None
     text: str
     bbox: BBox
     handwritten: bool
