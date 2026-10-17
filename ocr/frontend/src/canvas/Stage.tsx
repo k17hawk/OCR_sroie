@@ -12,6 +12,7 @@ import {
   ExtraRegionLayer,
   ReadingOrderLayer,
   BlockLayer,
+  TableSuggestionLayer,
 } from "./layers";
 import { HitLayer } from "./HitLayer";
 import { PickMenu } from "./PickMenu";
@@ -278,6 +279,7 @@ export function Stage() {
               {(layers.readingOrder || tool === "reading-order") && (
                 <ReadingOrderLayer doc={doc} />
               )}
+              <TableSuggestionLayer />
               <tools.Preview />
             </Group>
           </Layer>

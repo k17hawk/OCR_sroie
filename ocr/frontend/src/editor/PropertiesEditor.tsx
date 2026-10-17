@@ -10,6 +10,7 @@ import { DevanagariTextarea } from "./DevanagariTextarea";
 import { detectRegionLines } from "./DetectLinesButton";
 import { OcrRegionButton } from "./OcrRegionButton";
 import { TableOcrButton } from "./TableOcrButton";
+import { TableSuggestPanel } from "./TableSuggestPanel";
 import {
   setElementText, resizeLayoutElement, emptyTable, parentLayoutOf,
   appendReadingOrder, removeFromReadingOrder, nextReadingOrder,
@@ -679,6 +680,12 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
 
       {el.type === "list" && <ListEditor doc={doc} el={el} />}
       {el.type === "form_field" && <FormFieldEditor el={el} />}
+
+      {el.type === "table" && (
+        <Section label="suggested layout">
+          <TableSuggestPanel doc={doc} el={el} />
+        </Section>
+      )}
 
       {el.type === "table" && (
         <Section label="table OCR">

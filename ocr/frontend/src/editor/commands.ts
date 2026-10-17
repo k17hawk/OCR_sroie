@@ -1237,3 +1237,61 @@ export function afterListChange(d: Doc, listId: number): void {
   const el = d.layout.find((e) => e.id === listId) as any;
   syncListText(el, d);
 }
+
+
+// ---------------------------------------------------------------------------
+// Table layout suggested from the scan (POST /documents/{id}/suggest-table)
+// ---------------------------------------------------------------------------
+
+export interface SuggestedCell {
+  id: number; row: number; col: number; rowspan: number; colspan: number;
+  bbox: BBox; quad: [number, number][];
+}
+
+/**
+ * Put a suggested grid into a table region: rows, columns, merged cells and
+ * the measured cell boxes (quads follow a tilted page). Text already typed
+ * is kept: each new cell takes the text of the old cells whose centre lies
+ * inside it (joined by "\n"), and stays a header cell if any of them was.
+ * The region snaps to the printed table. Lines and ruling lines follow.
+ */
+export function applyTableSuggestion(
+  d: Doc, elementId: number,
+  s: { num_rows: number; num_cols: number; cells: SuggestedCell[];
+       region_bbox: BBox | null; region_quad: [number, number][] | null },
+): void {
+  const el = d.layout.find((e) => e.id === elementId) as any;
+  if (!el || el.type !== "table" || !s.cells.length) return;
+  if (typeof el.table_index !== "number" || el.table_index < 0 || !d.tables[el.table_index]) {
+    el.table_index = d.tables.length;
+    d.tables.push(emptyTable(el.bbox));
+  }
+  const t = d.tables[el.table_index];
+  const old = [...(t.cells ?? [])].sort((a, b) => a.row - b.row || a.col - b.col);
+  const holds = (b: BBox, c: BBox) => {
+    const x = (c[0] + c[2]) / 2, y = (c[1] + c[3]) / 2;
+    return x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
+  };
+  t.cells = s.cells.map((c, id) => {
+    const from = old.filter((o) => holds(c.bbox, o.bbox));
+    const text = from.map((o) => (o.text ?? "").trim()).filter(Boolean).join("\n");
+    return {
+      id, row: c.row, col: c.col, rowspan: c.rowspan, colspan: c.colspan,
+      text, is_header: from.some((o) => o.is_header), handwritten: from.some((o) => o.handwritten),
+      empty: text === "", bbox: c.bbox, quad: c.quad as unknown as Quad,
+    };
+  });
+  t.num_rows = s.num_rows;
+  t.num_cols = s.num_cols;
+  let hr = 0;
+  while (hr < s.num_rows && t.cells.filter((c) => c.row === hr).every((c) => c.is_header)) hr++;
+  t.header_rows = hr;
+  t.reading_order = t.cells.map((c) => c.id);
+  if (s.region_bbox) {
+    el.bbox = s.region_bbox;
+    el.quad = s.region_quad ?? quadFromBBox(s.region_bbox);
+    t.bbox = el.bbox;
+    t.quad = el.quad;
+  }
+  syncTable(d, elementId, { ruling: true });
+}

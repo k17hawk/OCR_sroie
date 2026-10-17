@@ -201,3 +201,34 @@ export async function snapBox(
   if (!r.ok) throw new Error(await r.text());
   return await r.json();
 }
+
+/** A table grid suggested from the ruling lines printed inside a drawn box. */
+export interface TableSuggestion {
+  ok: boolean;
+  /** page tilt in degrees (+ = counter-clockwise) */
+  skew_deg: number;
+  num_rows: number;
+  num_cols: number;
+  region_bbox: [number, number, number, number] | null;
+  region_quad: [number, number][] | null;
+  cells: {
+    id: number; row: number; col: number; rowspan: number; colspan: number;
+    bbox: [number, number, number, number]; quad: [number, number][];
+  }[];
+  html: string;
+  warnings: string[];
+}
+
+/** Rows, columns and merged cells read from the scan inside `bbox`; changes nothing. */
+export async function suggestTable(
+  documentId: string,
+  bbox: [number, number, number, number],
+): Promise<TableSuggestion> {
+  const r = await fetch(`/documents/${documentId}/suggest-table`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bbox }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return await r.json();
+}

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { produce, enableMapSet } from "immer";
 import type { Doc, LoadWarning, Project } from "./types";
+import type { TableSuggestion } from "./api";
 import { LAYER_DEFAULTS, type LayerKey } from "./lib";
 
 enableMapSet();
@@ -93,6 +94,10 @@ interface State {
   selection: Selection;
   setSelection: (s: Selection) => void;
 
+  /** a table layout suggested from the scan, shown in the right panel and on the canvas */
+  tableSuggestion: { elementId: number; box: number[]; result: TableSuggestion } | null;
+  setTableSuggestion: (s: { elementId: number; box: number[]; result: TableSuggestion } | null) => void;
+
   tool: Tool;
   setTool: (t: Tool) => void;
   drawTypeDefault: string;
@@ -155,6 +160,7 @@ export const useStore = create<State>((set, get) => ({
       serverRevision: revision,
       conflict: "none",
       saveStatus: { state: "idle" },
+      tableSuggestion: null, // a suggestion belongs to the page it was made for
     }),
 
   reloadIfClean: (doc, revision, imageUrl) => {
@@ -216,6 +222,8 @@ export const useStore = create<State>((set, get) => ({
     set({ revision, serverRevision: revision, dirty: false }),
   saveStatus: { state: "idle" },
   setSaveStatus: (saveStatus) => set({ saveStatus }),
+  tableSuggestion: null,
+  setTableSuggestion: (tableSuggestion) => set({ tableSuggestion }),
   loadWarnings: [],
   setLoadWarnings: (loadWarnings) => set({ loadWarnings }),
 

@@ -692,3 +692,19 @@ export function ReadingOrderLayer({ doc }: { doc: Doc }) {
     </>
   );
 }
+
+/** The table layout suggested from the scan (right panel), dashed until applied. */
+export function TableSuggestionLayer() {
+  const sug = useStore((s) => s.tableSuggestion);
+  const scale = useStore((s) => s.scale);
+  if (!sug || !sug.result.ok) return null;
+  const w = Math.max(1, 2 / scale);
+  return (
+    <Group listening={false}>
+      {sug.result.cells.map((c) => (
+        <Line key={c.id} points={c.quad.flat()} closed stroke="#2dd4bf" strokeWidth={w}
+              dash={[6 / scale, 4 / scale]} fill={c.rowspan > 1 || c.colspan > 1 ? "rgba(45,212,191,0.10)" : undefined} />
+      ))}
+    </Group>
+  );
+}

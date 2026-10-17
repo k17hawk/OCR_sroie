@@ -240,6 +240,27 @@ class SnapBoxRequest(BaseModel):
     clip_to: list[float] | None = Field(default=None, min_length=4, max_length=4)
 
 
+class SuggestTableRequest(BaseModel):
+    """A box drawn around a table on the scan (page pixels)."""
+    bbox: list[float] = Field(min_length=4, max_length=4)
+
+
+class SuggestTableResponse(BaseModel):
+    """Rows / columns / merged cells read from the printed ruling lines.
+
+    Cells are quads in the page image (the scan may be tilted); text is empty.
+    ``ok`` False: no grid found, ``warnings`` says why."""
+    ok: bool
+    skew_deg: float = 0.0
+    num_rows: int = 0
+    num_cols: int = 0
+    region_bbox: list[int] | None = None
+    region_quad: list[list[float]] | None = None
+    cells: list[dict[str, Any]] = []
+    html: str = ""
+    warnings: list[str] = []
+
+
 class SnapBoxResponse(BaseModel):
     bbox: list[int]
     changed: bool

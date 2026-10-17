@@ -21,6 +21,8 @@ from app.schemas.api import (
     PageFixRequest,
     SnapBoxRequest,
     SnapBoxResponse,
+    SuggestTableRequest,
+    SuggestTableResponse,
     PageFixResponse,
     StatusChange,
     TableOcrRequest,
@@ -32,6 +34,7 @@ from app.services import annotations as ann_service
 from app.services import documents as doc_service
 from app.services.lines import TEXT_TYPES, detect_page_lines, snap_box_to_ink
 from app.services.table_snap import snap_tables
+from app.services.table_suggest import suggest_table
 from app.services import projects as project_service
 from app.services import status as status_service
 from app.storage import get_storage
@@ -282,6 +285,14 @@ def snap_table_endpoint(document_id: str, body: PageFixRequest) -> PageFixRespon
         raise HTTPException(422, "html needs element_id")
     rec, warnings, info = snap_tables(_gray(row), rec, body.element_id, body.html)
     return PageFixResponse(record=rec, warnings=warnings, info=info)
+
+
+@router.post("/{document_id}/suggest-table", response_model=SuggestTableResponse)
+def suggest_table_endpoint(document_id: str, body: SuggestTableRequest) -> SuggestTableResponse:
+    """Suggest a table's grid (rows, columns, rowspan / colspan) from the ruling
+    lines printed inside ``bbox``. Nothing is changed on the page."""
+    row = _load(document_id)
+    return SuggestTableResponse(**suggest_table(_gray(row), body.bbox))
 
 
 @router.post("/{document_id}/snap-box", response_model=SnapBoxResponse)
