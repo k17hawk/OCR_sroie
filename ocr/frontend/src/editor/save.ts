@@ -12,15 +12,36 @@
  */
 import { useStore } from "../store";
 
-type Detail = { where?: string; loc?: unknown[]; msg?: string; got?: unknown };
+type Detail = {
+  where?: string; loc?: unknown[]; msg?: string; got?: unknown;
+  type?: string; before?: string; after?: string;
+};
 
-function describe(body: string): string {
+const clip = (t: string, n = 120) => {
+  const one = t.replace(/\n/g, " ⏎ ");
+  return one.length > n ? one.slice(0, n) + "…" : one;
+};
+
+/** A blocked save that would drop printed text: say what is missing and
+ *  show the region's text next to what its lines give, so the line that
+ *  lacks it can be found (and fixed) at a glance. */
+function describeTextLoss(x: Detail): string {
+  return [
+    `${x.where}: printed text would be lost — "${String(x.got ?? "")}" is in the text but in none of its lines.`,
+    `   text : ${clip(x.before ?? "")}`,
+    `   lines: ${clip(x.after ?? "") || "(no lines)"}`,
+    `   Fix the line that lacks it (or run Detect lines on this region), or remove it from the text if it is not printed.`,
+  ].join("\n");
+}
+
+export function describe(body: string): string {
   try {
     const j = JSON.parse(body);
     const d = j?.detail;
     if (typeof d === "string") return d;
     if (Array.isArray(d)) {
       const parts = (d as Detail[]).slice(0, 4).map((x) => {
+        if (x.type === "text_loss") return describeTextLoss(x);
         const where = x.where ?? (Array.isArray(x.loc) ? x.loc.slice(2).join(".") : "");
         return `${where}: ${x.msg ?? ""}${x.got !== undefined ? ` (got ${JSON.stringify(x.got)})` : ""}`;
       });

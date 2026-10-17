@@ -230,7 +230,7 @@ export function Toolbar() {
           </button>
           <LoadWarningsNote />
           {saveStatus.state === "error" && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-80 whitespace-pre-wrap rounded border border-rose-700 bg-rose-950 p-2 text-[11px] text-rose-100 shadow-lg">
+            <div className="absolute right-0 top-full z-50 mt-1 w-[32rem] max-w-[90vw] whitespace-pre-wrap break-words rounded border border-rose-700 bg-rose-950 p-2 text-[11px] text-rose-100 shadow-lg">
               <button
                 onClick={() => setSaveStatus({ state: "idle" })}
                 className="float-right ml-2 text-rose-300 hover:text-white"
