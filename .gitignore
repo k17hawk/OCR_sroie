@@ -236,3 +236,6 @@ nepali_synth/
 !ocr/frontend/index.html
 ocr/frontend/tsconfig.tsbuildinfo
 *.patch
+
+# generated schema files are checked in (make check compares them)
+!schema/*.schema.json

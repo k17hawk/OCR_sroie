@@ -1,0 +1,3599 @@
+{
+  "$defs": {
+    "Annotation": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "enum": [
+            "synthetic",
+            "real"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "generated",
+            "pre_annotated",
+            "in_progress",
+            "submitted",
+            "approved",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "tool",
+        "status"
+      ],
+      "title": "Annotation",
+      "type": "object"
+    },
+    "Block": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "block_id": {
+          "title": "Block Id",
+          "type": "integer"
+        },
+        "font_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Id"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "bbox",
+        "block_id",
+        "quad"
+      ],
+      "title": "Block",
+      "type": "object"
+    },
+    "FieldOption": {
+      "additionalProperties": false,
+      "description": "One printed choice. ``line_id`` is the option's text line; the mark is\neither a drawn square (``box``) or a table cell to tick (``tick_cell_id``).\n``checked`` is null until known (tick cells: derived on save).",
+      "properties": {
+        "line_id": {
+          "title": "Line Id",
+          "type": "integer"
+        },
+        "checked": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked"
+        },
+        "box": {
+          "anyOf": [
+            {
+              "description": "[x0, y0, x1, y1] integer pixels",
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Box"
+        },
+        "tick_cell_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tick Cell Id"
+        }
+      },
+      "required": [
+        "line_id"
+      ],
+      "title": "FieldOption",
+      "type": "object"
+    },
+    "FieldValue": {
+      "additionalProperties": false,
+      "description": "The answer area. A blank is {text: \"\", bbox, handwritten: false, empty: true}.",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "handwritten": {
+          "title": "Handwritten",
+          "type": "boolean"
+        },
+        "empty": {
+          "title": "Empty",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "bbox",
+        "handwritten",
+        "empty"
+      ],
+      "title": "FieldValue",
+      "type": "object"
+    },
+    "FigureLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "figure",
+          "default": "figure",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "subtype": {
+          "title": "Subtype",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "subtype",
+        "quad"
+      ],
+      "title": "FigureLayout",
+      "type": "object"
+    },
+    "FingerprintExtraRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "fingerprint",
+          "default": "fingerprint",
+          "title": "Type",
+          "type": "string"
+        },
+        "hand": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Hand",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hand",
+        "bbox",
+        "quad"
+      ],
+      "title": "FingerprintExtraRegion",
+      "type": "object"
+    },
+    "FooterLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "footer",
+          "default": "footer",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "FooterLayout",
+      "type": "object"
+    },
+    "FormField": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LabelRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "field_type": {
+          "title": "Field Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FieldOption"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "field_type"
+      ],
+      "title": "FormField",
+      "type": "object"
+    },
+    "FormFieldLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "form_field",
+          "default": "form_field",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FormField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "FormFieldLayout",
+      "type": "object"
+    },
+    "FormLabelLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "form_label",
+          "default": "form_label",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "FormLabelLayout",
+      "type": "object"
+    },
+    "FormValueLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "form_value",
+          "default": "form_value",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "FormValueLayout",
+      "type": "object"
+    },
+    "HandwritingLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "handwriting",
+          "default": "handwriting",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "subtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtype"
+        },
+        "handwritten": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Handwritten"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "HandwritingLayout",
+      "type": "object"
+    },
+    "HandwrittenAnnotationLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "handwritten_annotation",
+          "default": "handwritten_annotation",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "HandwrittenAnnotationLayout",
+      "type": "object"
+    },
+    "HandwrittenCorrectionLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "handwritten_correction",
+          "default": "handwritten_correction",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "HandwrittenCorrectionLayout",
+      "type": "object"
+    },
+    "HandwrittenNumberLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "handwritten_number",
+          "default": "handwritten_number",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "HandwrittenNumberLayout",
+      "type": "object"
+    },
+    "HeaderLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "header",
+          "default": "header",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "HeaderLayout",
+      "type": "object"
+    },
+    "HeadingLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "heading",
+          "default": "heading",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "level": {
+          "title": "Level",
+          "type": "integer"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "level",
+        "quad"
+      ],
+      "title": "HeadingLayout",
+      "type": "object"
+    },
+    "LabelLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "label",
+          "default": "label",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "LabelLayout",
+      "type": "object"
+    },
+    "LabelRef": {
+      "additionalProperties": false,
+      "description": "Where a field's question is printed: one line, one table cell (of the\nregion's own table) or a whole region.",
+      "properties": {
+        "line_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Id"
+        },
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        }
+      },
+      "title": "LabelRef",
+      "type": "object"
+    },
+    "Line": {
+      "additionalProperties": false,
+      "description": "One printed line. ``id`` is stable across saves and is what fields and\noptions point at. ``block_id`` is the region id; ``table_index`` +\n``cell_id`` / ``item_index`` place the line inside a table cell / list item.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "block_id": {
+          "title": "Block Id",
+          "type": "integer"
+        },
+        "line_in_block": {
+          "title": "Line In Block",
+          "type": "integer"
+        },
+        "is_heading": {
+          "title": "Is Heading",
+          "type": "boolean"
+        },
+        "font_size": {
+          "title": "Font Size",
+          "type": "number"
+        },
+        "font_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Id"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "label",
+                "value",
+                "option"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "table_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Table Index"
+        },
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell Id"
+        },
+        "handwritten": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Handwritten"
+        },
+        "list_level": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "List Level"
+        },
+        "item_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Index"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "bbox",
+        "block_id",
+        "line_in_block",
+        "is_heading",
+        "font_size",
+        "quad"
+      ],
+      "title": "Line",
+      "type": "object"
+    },
+    "ListItem": {
+      "additionalProperties": false,
+      "properties": {
+        "marker": {
+          "title": "Marker",
+          "type": "string"
+        },
+        "level": {
+          "title": "Level",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "children": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Children"
+        }
+      },
+      "required": [
+        "marker",
+        "level",
+        "text"
+      ],
+      "title": "ListItem",
+      "type": "object"
+    },
+    "ListLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "list",
+          "default": "list",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "list_style": {
+          "title": "List Style",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ListItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FormField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "list_style",
+        "items",
+        "quad"
+      ],
+      "title": "ListLayout",
+      "type": "object"
+    },
+    "LogoLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logo",
+          "default": "logo",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "quad"
+      ],
+      "title": "LogoLayout",
+      "type": "object"
+    },
+    "MixedTextLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "mixed_text",
+          "default": "mixed_text",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "MixedTextLayout",
+      "type": "object"
+    },
+    "OptionsLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "options",
+          "default": "options",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "OptionsLayout",
+      "type": "object"
+    },
+    "PageNumberLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "page_number",
+          "default": "page_number",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "PageNumberLayout",
+      "type": "object"
+    },
+    "ParagraphLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "paragraph",
+          "default": "paragraph",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "ParagraphLayout",
+      "type": "object"
+    },
+    "Quality": {
+      "additionalProperties": false,
+      "properties": {
+        "blur_sigma": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blur Sigma"
+        },
+        "downscale": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Downscale"
+        },
+        "noise_sigma": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Noise Sigma"
+        },
+        "is_grayscale": {
+          "title": "Is Grayscale",
+          "type": "boolean"
+        },
+        "is_binarized": {
+          "title": "Is Binarized",
+          "type": "boolean"
+        },
+        "skew_deg": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skew Deg"
+        },
+        "perspective": {
+          "title": "Perspective",
+          "type": "boolean"
+        },
+        "ops": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Ops",
+          "type": "array"
+        },
+        "jpeg_quality": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Jpeg Quality"
+        },
+        "profile": {
+          "default": "unknown",
+          "title": "Profile",
+          "type": "string"
+        },
+        "is_clean": {
+          "title": "Is Clean",
+          "type": "boolean"
+        },
+        "has_stamp": {
+          "title": "Has Stamp",
+          "type": "boolean"
+        },
+        "has_signature": {
+          "title": "Has Signature",
+          "type": "boolean"
+        },
+        "has_handwriting": {
+          "title": "Has Handwriting",
+          "type": "boolean"
+        },
+        "has_fold": {
+          "title": "Has Fold",
+          "type": "boolean"
+        },
+        "has_bleedthrough": {
+          "title": "Has Bleedthrough",
+          "type": "boolean"
+        },
+        "line_count": {
+          "default": 0,
+          "title": "Line Count",
+          "type": "integer"
+        },
+        "table_count": {
+          "default": 0,
+          "title": "Table Count",
+          "type": "integer"
+        },
+        "figure_count": {
+          "default": 0,
+          "title": "Figure Count",
+          "type": "integer"
+        },
+        "stamp_bboxes": {
+          "default": [],
+          "items": {
+            "description": "[x0, y0, x1, y1] integer pixels",
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          "title": "Stamp Bboxes",
+          "type": "array"
+        },
+        "signature_bboxes": {
+          "default": [],
+          "items": {
+            "description": "[x0, y0, x1, y1] integer pixels",
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          "title": "Signature Bboxes",
+          "type": "array"
+        },
+        "raw_lengths": {
+          "$ref": "#/$defs/RawLengths"
+        }
+      },
+      "required": [
+        "is_grayscale",
+        "is_binarized",
+        "perspective",
+        "is_clean",
+        "has_stamp",
+        "has_signature",
+        "has_handwriting",
+        "has_fold",
+        "has_bleedthrough",
+        "raw_lengths"
+      ],
+      "title": "Quality",
+      "type": "object"
+    },
+    "RawLengths": {
+      "additionalProperties": false,
+      "properties": {
+        "paragraph_chars": {
+          "title": "Paragraph Chars",
+          "type": "integer"
+        },
+        "list_items": {
+          "title": "List Items",
+          "type": "integer"
+        },
+        "form_fields": {
+          "title": "Form Fields",
+          "type": "integer"
+        },
+        "table_cells": {
+          "title": "Table Cells",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "paragraph_chars",
+        "list_items",
+        "form_fields",
+        "table_cells"
+      ],
+      "title": "RawLengths",
+      "type": "object"
+    },
+    "RulingLine": {
+      "additionalProperties": false,
+      "properties": {
+        "table_index": {
+          "title": "Table Index",
+          "type": "integer"
+        },
+        "orientation": {
+          "enum": [
+            "h",
+            "v"
+          ],
+          "title": "Orientation",
+          "type": "string"
+        },
+        "width": {
+          "title": "Width",
+          "type": "integer"
+        },
+        "p0": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "P0",
+          "type": "array"
+        },
+        "p1": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "P1",
+          "type": "array"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        }
+      },
+      "required": [
+        "table_index",
+        "orientation",
+        "width",
+        "p0",
+        "p1",
+        "bbox"
+      ],
+      "title": "RulingLine",
+      "type": "object"
+    },
+    "SignatureCaptionLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "signature_caption",
+          "default": "signature_caption",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "SignatureCaptionLayout",
+      "type": "object"
+    },
+    "SignatureLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "signature",
+          "default": "signature",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "signer": {
+          "title": "Signer",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "signer",
+        "quad"
+      ],
+      "title": "SignatureLayout",
+      "type": "object"
+    },
+    "StampLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "stamp",
+          "default": "stamp",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "stamp_text": {
+          "title": "Stamp Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "stamp_text",
+        "quad"
+      ],
+      "title": "StampLayout",
+      "type": "object"
+    },
+    "SubheadingLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "subheading",
+          "default": "subheading",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "SubheadingLayout",
+      "type": "object"
+    },
+    "Table": {
+      "additionalProperties": false,
+      "description": "``header_rows`` = number of leading rows whose cells are all <th>.",
+      "properties": {
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        },
+        "num_rows": {
+          "title": "Num Rows",
+          "type": "integer"
+        },
+        "num_cols": {
+          "title": "Num Cols",
+          "type": "integer"
+        },
+        "header_rows": {
+          "title": "Header Rows",
+          "type": "integer"
+        },
+        "ruling_style": {
+          "enum": [
+            "full",
+            "horizontal",
+            "none",
+            "partial"
+          ],
+          "title": "Ruling Style",
+          "type": "string"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Theme"
+        },
+        "col_types": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Col Types"
+        },
+        "html": {
+          "title": "Html",
+          "type": "string"
+        },
+        "reading_order": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Reading Order",
+          "type": "array"
+        },
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/TableCell"
+          },
+          "title": "Cells",
+          "type": "array"
+        }
+      },
+      "required": [
+        "bbox",
+        "quad",
+        "num_rows",
+        "num_cols",
+        "header_rows",
+        "ruling_style",
+        "html",
+        "reading_order",
+        "cells"
+      ],
+      "title": "Table",
+      "type": "object"
+    },
+    "TableCell": {
+      "additionalProperties": false,
+      "description": "``text`` uses \"\\n\" between printed lines; ``html`` renders it as <br>.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        },
+        "col": {
+          "title": "Col",
+          "type": "integer"
+        },
+        "rowspan": {
+          "title": "Rowspan",
+          "type": "integer"
+        },
+        "colspan": {
+          "title": "Colspan",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "is_header": {
+          "title": "Is Header",
+          "type": "boolean"
+        },
+        "handwritten": {
+          "title": "Handwritten",
+          "type": "boolean"
+        },
+        "empty": {
+          "title": "Empty",
+          "type": "boolean"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "row",
+        "col",
+        "rowspan",
+        "colspan",
+        "text",
+        "is_header",
+        "handwritten",
+        "empty",
+        "bbox",
+        "quad"
+      ],
+      "title": "TableCell",
+      "type": "object"
+    },
+    "TableFooterLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "table_footer",
+          "default": "table_footer",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "TableFooterLayout",
+      "type": "object"
+    },
+    "TableHeadingLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "table_heading",
+          "default": "table_heading",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "TableHeadingLayout",
+      "type": "object"
+    },
+    "TableLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "table",
+          "default": "table",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "table_index": {
+          "title": "Table Index",
+          "type": "integer"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FormField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "table_index",
+        "quad"
+      ],
+      "title": "TableLayout",
+      "type": "object"
+    },
+    "TitleLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "title",
+          "default": "title",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "TitleLayout",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "const": "2.1",
+      "default": "2.1",
+      "title": "V",
+      "type": "string"
+    },
+    "image": {
+      "title": "Image",
+      "type": "string"
+    },
+    "width": {
+      "title": "Width",
+      "type": "integer"
+    },
+    "height": {
+      "title": "Height",
+      "type": "integer"
+    },
+    "document_id": {
+      "title": "Document Id",
+      "type": "string"
+    },
+    "page_number": {
+      "title": "Page Number",
+      "type": "integer"
+    },
+    "page_count": {
+      "title": "Page Count",
+      "type": "integer"
+    },
+    "language": {
+      "enum": [
+        "ne",
+        "en",
+        "mixed",
+        "hi"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "digit_style": {
+      "enum": [
+        "dev",
+        "latin",
+        "mixed",
+        "none"
+      ],
+      "title": "Digit Style",
+      "type": "string"
+    },
+    "doc_type": {
+      "title": "Doc Type",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "fonts": {
+      "default": [],
+      "items": {},
+      "title": "Fonts",
+      "type": "array"
+    },
+    "font_ids": {
+      "default": [],
+      "items": {},
+      "title": "Font Ids",
+      "type": "array"
+    },
+    "layout": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "figure": "#/$defs/FigureLayout",
+            "footer": "#/$defs/FooterLayout",
+            "form_field": "#/$defs/FormFieldLayout",
+            "form_label": "#/$defs/FormLabelLayout",
+            "form_value": "#/$defs/FormValueLayout",
+            "handwriting": "#/$defs/HandwritingLayout",
+            "handwritten_annotation": "#/$defs/HandwrittenAnnotationLayout",
+            "handwritten_correction": "#/$defs/HandwrittenCorrectionLayout",
+            "handwritten_number": "#/$defs/HandwrittenNumberLayout",
+            "header": "#/$defs/HeaderLayout",
+            "heading": "#/$defs/HeadingLayout",
+            "label": "#/$defs/LabelLayout",
+            "list": "#/$defs/ListLayout",
+            "logo": "#/$defs/LogoLayout",
+            "mixed_text": "#/$defs/MixedTextLayout",
+            "options": "#/$defs/OptionsLayout",
+            "page_number": "#/$defs/PageNumberLayout",
+            "paragraph": "#/$defs/ParagraphLayout",
+            "signature": "#/$defs/SignatureLayout",
+            "signature_caption": "#/$defs/SignatureCaptionLayout",
+            "stamp": "#/$defs/StampLayout",
+            "subheading": "#/$defs/SubheadingLayout",
+            "table": "#/$defs/TableLayout",
+            "table_footer": "#/$defs/TableFooterLayout",
+            "table_heading": "#/$defs/TableHeadingLayout",
+            "title": "#/$defs/TitleLayout"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/HeaderLayout"
+          },
+          {
+            "$ref": "#/$defs/TitleLayout"
+          },
+          {
+            "$ref": "#/$defs/HeadingLayout"
+          },
+          {
+            "$ref": "#/$defs/SubheadingLayout"
+          },
+          {
+            "$ref": "#/$defs/ParagraphLayout"
+          },
+          {
+            "$ref": "#/$defs/FooterLayout"
+          },
+          {
+            "$ref": "#/$defs/PageNumberLayout"
+          },
+          {
+            "$ref": "#/$defs/SignatureCaptionLayout"
+          },
+          {
+            "$ref": "#/$defs/FigureLayout"
+          },
+          {
+            "$ref": "#/$defs/TableLayout"
+          },
+          {
+            "$ref": "#/$defs/TableHeadingLayout"
+          },
+          {
+            "$ref": "#/$defs/TableFooterLayout"
+          },
+          {
+            "$ref": "#/$defs/ListLayout"
+          },
+          {
+            "$ref": "#/$defs/FormFieldLayout"
+          },
+          {
+            "$ref": "#/$defs/FormLabelLayout"
+          },
+          {
+            "$ref": "#/$defs/FormValueLayout"
+          },
+          {
+            "$ref": "#/$defs/LabelLayout"
+          },
+          {
+            "$ref": "#/$defs/OptionsLayout"
+          },
+          {
+            "$ref": "#/$defs/LogoLayout"
+          },
+          {
+            "$ref": "#/$defs/SignatureLayout"
+          },
+          {
+            "$ref": "#/$defs/StampLayout"
+          },
+          {
+            "$ref": "#/$defs/HandwritingLayout"
+          },
+          {
+            "$ref": "#/$defs/HandwrittenAnnotationLayout"
+          },
+          {
+            "$ref": "#/$defs/HandwrittenCorrectionLayout"
+          },
+          {
+            "$ref": "#/$defs/HandwrittenNumberLayout"
+          },
+          {
+            "$ref": "#/$defs/MixedTextLayout"
+          }
+        ]
+      },
+      "title": "Layout",
+      "type": "array"
+    },
+    "blocks": {
+      "items": {
+        "$ref": "#/$defs/Block"
+      },
+      "title": "Blocks",
+      "type": "array"
+    },
+    "lines": {
+      "items": {
+        "$ref": "#/$defs/Line"
+      },
+      "title": "Lines",
+      "type": "array"
+    },
+    "tables": {
+      "items": {
+        "$ref": "#/$defs/Table"
+      },
+      "title": "Tables",
+      "type": "array"
+    },
+    "ruling_lines": {
+      "items": {
+        "$ref": "#/$defs/RulingLine"
+      },
+      "title": "Ruling Lines",
+      "type": "array"
+    },
+    "extra_regions": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "fingerprint": "#/$defs/FingerprintExtraRegion"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FingerprintExtraRegion"
+          }
+        ]
+      },
+      "title": "Extra Regions",
+      "type": "array"
+    },
+    "quality": {
+      "$ref": "#/$defs/Quality"
+    },
+    "annotation": {
+      "$ref": "#/$defs/Annotation"
+    }
+  },
+  "required": [
+    "image",
+    "width",
+    "height",
+    "document_id",
+    "page_number",
+    "page_count",
+    "language",
+    "digit_style",
+    "doc_type",
+    "text",
+    "layout",
+    "blocks",
+    "lines",
+    "tables",
+    "ruling_lines",
+    "extra_regions",
+    "quality",
+    "annotation"
+  ],
+  "title": "Doc",
+  "type": "object"
+}
