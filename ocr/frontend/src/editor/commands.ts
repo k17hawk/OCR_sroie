@@ -128,6 +128,23 @@ export function lineParentFor(d: Doc, bbox: BBox, sel: Selection): number | null
   return best ? best.id : null;
 }
 
+/**
+ * The list item a box drawn in list ``listId`` belongs to: the item whose
+ * existing lines overlap it most vertically (at least half of the box's
+ * height). null when no item line is beside it.
+ */
+export function listItemBeside(d: Doc, listId: number, bbox: BBox): number | null {
+  const h = Math.max(1, bbox[3] - bbox[1]);
+  let best: number | null = null;
+  let bestOv = 0.5 * h;
+  for (const ln of d.lines) {
+    if (ln.block_id !== listId || ln.item_index == null) continue;
+    const ov = Math.min(bbox[3], ln.bbox[3]) - Math.max(bbox[1], ln.bbox[1]);
+    if (ov >= bestOv) { bestOv = ov; best = ln.item_index; }
+  }
+  return best;
+}
+
 export function addLine(d: Doc, bbox: BBox, blockId: number | null): number {
   const quad = quadFromBBox(bbox);
   let parentId = blockId;
@@ -144,8 +161,17 @@ export function addLine(d: Doc, bbox: BBox, blockId: number | null): number {
     font_id: null,
     quad,
   };
-  // a line drawn in a table belongs to the cell it sits in
   const parent = d.layout.find((e) => e.id === parentId) as any;
+  // a line drawn in a list (an item's marker "क)" / "•", or its words) joins
+  // the item whose lines it sits beside; otherwise it is kept unassigned
+  if (parent?.type === "list") {
+    const item = listItemBeside(d, parentId!, bbox);
+    if (item != null) {
+      line.list_level = (parent.items?.[item]?.level as number) ?? 0;
+      line.item_index = item;
+    }
+  }
+  // a line drawn in a table belongs to the cell it sits in
   if (parent?.type === "table") {
     const t = d.tables[parent.table_index];
     const cell = t?.cells
@@ -1125,9 +1151,15 @@ export function syncListLines(d: Doc, listId: number): void {
     // an item printed on several lines has one line record per printed line
     const parts = lineText(it).split("\n");
     const want = parts.join(" ");
-    const group = indexed
+    const group = (indexed
       ? old.filter((ln) => ln.item_index === i)
-      : old.length === items.length ? [old[i]] : old.filter((ln) => parts.includes(ln.text.trim()) || ln.text.trim() === want.trim());
+      : old.length === items.length ? [old[i]] : old.filter((ln) => parts.includes(ln.text.trim()) || ln.text.trim() === want.trim()))
+      // an item's pieces in reading order: marker "क)" before its words
+      .slice().sort((a, b) => {
+        const ca = (a.bbox[1] + a.bbox[3]) / 2, cb = (b.bbox[1] + b.bbox[3]) / 2;
+        const tol = Math.max(4, Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1]) / 2);
+        return Math.abs(ca - cb) <= tol ? a.bbox[0] - b.bbox[0] : ca - cb;
+      });
     const base = { block_id: listId, is_heading: false, list_level: it.level || 0, item_index: i };
     if (group.length && group.map((ln) => ln.text.trim()).join(" ") === want.trim()) {
       for (const ln of group) fresh.push({ ...ln, ...base });
@@ -1143,6 +1175,20 @@ export function syncListLines(d: Doc, listId: number): void {
     }
     // an item with no measured line gets none (no evenly split placeholder
     // rows): draw its line, or use Detect lines
+  });
+  // a line that belongs to no item (drawn by hand: a marker, a note) is kept
+  // as it is - never dropped - and everything is put in reading order
+  const used = new Set(fresh.map((ln) => ln.id ?? ln));
+  for (const ln of old) {
+    if (used.has(ln.id ?? ln)) continue;
+    const inItems = ln.item_index != null && ln.item_index < items.length;
+    const merged = inItems && fresh.some((f) => f.item_index === ln.item_index);
+    if (!merged) fresh.push({ ...ln });
+  }
+  const cy = (ln: any) => (ln.bbox[1] + ln.bbox[3]) / 2;
+  fresh.sort((a, b) => {
+    const tol = Math.max(4, Math.min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1]) / 2);
+    return Math.abs(cy(a) - cy(b)) <= tol ? a.bbox[0] - b.bbox[0] : cy(a) - cy(b);
   });
   fresh.forEach((ln, k) => { ln.line_in_block = k; });
   replaceLines(d, (ln) => ln.block_id === listId, fresh);
