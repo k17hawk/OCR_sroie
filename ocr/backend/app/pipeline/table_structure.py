@@ -727,7 +727,11 @@ def _fill_text(cells: list[Cell], lines: list[TLine], ink: Optional[np.ndarray] 
                 rows[-1].append(p)
             else:
                 rows.append([p])
-        c.text = " ".join(" ".join(p[2] for p in sorted(r, key=lambda p: p[1])) for r in rows).strip()
+        # same printed line -> space; a new printed line inside the cell (wrapped
+        # text) -> "\n", written to the HTML as <br> and kept by snap-table
+        c.text = "\n".join(
+            t for t in (" ".join(p[2] for p in sorted(r, key=lambda p: p[1])).strip() for r in rows) if t
+        )
         c.handwritten = any(p[3].handwritten for p in ps)
         c.line_ids = sorted({p[3].idx for p in ps})
 
