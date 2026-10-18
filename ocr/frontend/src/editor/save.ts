@@ -26,11 +26,14 @@ const clip = (t: string, n = 120) => {
  *  show the region's text next to what its lines give, so the line that
  *  lacks it can be found (and fixed) at a glance. */
 function describeTextLoss(x: Detail): string {
+  const table = /\btable\)/.test(x.where ?? "");
   return [
     `${x.where}: printed text would be lost — "${String(x.got ?? "")}" is in the text but in none of its lines.`,
     `   text : ${clip(x.before ?? "")}`,
     `   lines: ${clip(x.after ?? "") || "(no lines)"}`,
-    `   Select the region and use the buttons under its text box: "Detect lines" when printed rows have no line, "Copy text into lines" when the text is right, "Use the lines" when it is not printed.`,
+    table
+      ? `   A table's text is made from its lines: fix the spelling on the line (click it) or in the Table HTML — or select the table and press "Copy text into lines".`
+      : `   Select the region and use the buttons under its text box: "Detect lines" when printed rows have no line, "Copy text into lines" when the text is right, "Use the lines" when it is not printed.`,
   ].join("\n");
 }
 

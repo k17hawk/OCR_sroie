@@ -72,7 +72,10 @@ function TextLinesMismatch({ doc, id, edit }: {
   const textRows = diff.text.split("\n").length;
   const lineRows = diff.lines.split("\n").length;
   // more rows in the text than lines: printed rows have no line yet
-  const missingLines = textRows > lineRows;
+  const isTable = doc.layout.find((e) => e.id === id)?.type === "table";
+  // more rows in the text than lines: printed rows have no line yet
+  // (a table's lines come from its cells / Table OCR, not Detect lines)
+  const missingLines = textRows > lineRows && !isTable;
   const detect = async () => {
     setBusy(true); setMsg(null);
     try {
@@ -103,13 +106,13 @@ function TextLinesMismatch({ doc, id, edit }: {
         </div>
       )}
       <div className="mt-2 flex flex-wrap gap-2">
-        <button
+        {!isTable && <button
           type="button"
           disabled={busy}
           className={btn + (missingLines ? "bg-teal-700 text-white hover:bg-teal-600" : "bg-amber-800/70")}
           title="Measure one line per text row on the scan (keeps the existing lines' ids)"
           onClick={() => void detect()}
-        >{busy ? "Detecting…" : "Detect lines"}</button>
+        >{busy ? "Detecting…" : "Detect lines"}</button>}
         <button
           type="button"
           disabled={!diff.sameRows}
@@ -1081,8 +1084,8 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
             ln.text = v;
             // a cell's text is made from all of its lines
             if (ln.table_index != null && ln.cell_id != null) syncCellFromLines(d, ln.table_index, ln.cell_id);
-            // …and a region's text from its lines
-            else syncRegionTextFromLines(d, ln.block_id);
+            // …and a region's (or table's) text from its lines
+            syncRegionTextFromLines(d, ln.block_id);
           })}
           rows={3}
         />
@@ -1133,7 +1136,7 @@ function LineEditor({ doc, index }: { doc: Doc; index: number }) {
           const [gone] = d.lines.splice(index, 1);
           if (!gone) return;
           if (gone.table_index != null && gone.cell_id != null) syncCellFromLines(d, gone.table_index, gone.cell_id);
-          else syncRegionTextFromLines(d, gone.block_id);
+          syncRegionTextFromLines(d, gone.block_id);
         })}
         className="w-full rounded bg-rose-900/50 py-1 text-[11px] text-rose-200 hover:bg-rose-800/60"
       >

@@ -12,6 +12,11 @@ import { useStore } from "../store";
 import type { BBox, Doc } from "../types";
 import { applyTableSuggestion } from "./commands";
 
+/** table boxes whose suggestion was dismissed or applied: never suggested
+ *  again by itself (the button still works) */
+const handled = new Set<string>();
+const keyOf = (docId: string, id: number, box: number[]) => `${docId}:${id}:${box.map(Math.round).join(",")}`;
+
 const sameBox = (a: number[], b: number[]) => a.length === b.length && a.every((v, i) => Math.round(v) === Math.round(b[i]));
 
 export function TableSuggestPanel({ doc, el }: { doc: Doc; el: any }) {
@@ -20,6 +25,11 @@ export function TableSuggestPanel({ doc, el }: { doc: Doc; el: any }) {
   const edit = useStore((s) => s.edit);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // the page right after Apply: Undo is offered only while Apply is still the last edit
+  const [appliedDoc, setAppliedDoc] = useState<Doc | null>(null);
+  const current = useStore((s) => s.doc);
+  const undo = useStore((s) => s.undo);
+  const key = keyOf(doc.document_id, el.id, el.bbox);
 
   const table = doc.tables[el.table_index];
   const hasCells = !!table?.cells?.length;
@@ -41,7 +51,7 @@ export function TableSuggestPanel({ doc, el }: { doc: Doc; el: any }) {
 
   // a new (empty) table box: suggest by itself, once the box has stopped moving
   useEffect(() => {
-    if (hasCells || fresh || busy) return;
+    if (hasCells || fresh || busy || handled.has(key)) return;
     const t = setTimeout(() => void run(), 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,7 +62,16 @@ export function TableSuggestPanel({ doc, el }: { doc: Doc; el: any }) {
       `Replace the current ${table.cells.length} cell(s) with the suggested ${r.cells.length}? ` +
       "Text you typed is kept where it falls inside a new cell.",
     )) return;
+    handled.add(key);
     edit((d) => applyTableSuggestion(d, el.id, r as any));
+    // the region snaps to the table: don't suggest again for the new box either
+    const now = useStore.getState().doc?.layout.find((e) => e.id === el.id);
+    if (now) handled.add(keyOf(doc.document_id, el.id, now.bbox));
+    setSug(null);
+    setAppliedDoc(useStore.getState().doc);
+  };
+  const dismiss = () => {
+    handled.add(key);
     setSug(null);
   };
 
@@ -69,6 +88,18 @@ export function TableSuggestPanel({ doc, el }: { doc: Doc; el: any }) {
         {busy ? "Reading the scan…" : mine && !fresh ? "Box changed — suggest again" : "Suggest layout from scan"}
       </button>
       {err && <div className="break-words text-[10px] text-rose-400">{err}</div>}
+
+      {appliedDoc && appliedDoc === current && !r && (
+        <div className="flex items-center gap-2 rounded border border-slate-700 p-2 text-[11px] text-slate-300">
+          <span className="flex-1">Suggested layout applied. Not right?</span>
+          <button
+            type="button"
+            onClick={() => { undo(); setAppliedDoc(null); }}
+            className="rounded bg-slate-700 px-2 py-1 hover:bg-slate-600"
+            title="Put the table back as it was before Apply"
+          >Undo</button>
+        </div>
+      )}
 
       {r && !r.ok && (
         <ul className="space-y-0.5 text-[10px] text-amber-300">
@@ -100,8 +131,9 @@ export function TableSuggestPanel({ doc, el }: { doc: Doc; el: any }) {
             >Apply</button>
             <button
               type="button"
-              onClick={() => setSug(null)}
+              onClick={dismiss}
               className="flex-1 rounded bg-slate-800 py-1 text-slate-300 hover:bg-slate-700"
+              title="Keep the table as it is; not suggested again for this box"
             >Dismiss</button>
           </div>
           <div className="mt-1 text-[10px] text-slate-500">

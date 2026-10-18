@@ -277,40 +277,58 @@ function setFormFieldText(d: Doc, el: any, text: string): void {
 export function textVsLines(d: Doc, blockId: number):
   { text: string; lines: string; sameRows: boolean } | null {
   const el = d.layout.find((e) => e.id === blockId) as any;
-  if (!el || el.type === "table" || typeof el.text !== "string") return null;
-  const rows = (t: string) => t.split("\n").map((r) => r.trim()).filter(Boolean);
-  const own = d.lines
-    .filter((ln) => ln.block_id === blockId && ln.cell_id == null)
-    .sort((a, b) => a.line_in_block - b.line_in_block)
-    .map((ln) => (ln.text ?? "").trim())
-    .filter(Boolean);
+  if (!el || typeof el.text !== "string") return null;
+  const own = regionLines(d, blockId).map((ln) => ln.text.trim());
   if (!own.length) return null;
-  const text = rows(el.text);
+  const text = el.text.split("\n").map((r: string) => r.trim()).filter(Boolean);
   if (text.join("\n") === own.join("\n")) return null;
   return { text: text.join("\n"), lines: own.join("\n"), sameRows: text.length === own.length };
 }
 
-/** Copy the region's text rows into its lines (same number of rows only). */
+/**
+ * A region's non-empty lines in the order the server joins them into the
+ * region text: a table's lines by its cell reading order, then
+ * line_in_block; any other region's own lines by line_in_block.
+ */
+export function regionLines(d: Doc, blockId: number): Line[] {
+  const el = d.layout.find((e) => e.id === blockId) as any;
+  if (!el) return [];
+  const mine = d.lines.filter((ln) => ln.block_id === blockId && (ln.text ?? "").trim());
+  if (el.type !== "table") {
+    return mine.filter((ln) => ln.cell_id == null).sort((a, b) => a.line_in_block - b.line_in_block);
+  }
+  const t = d.tables[el.table_index];
+  const order = t?.reading_order?.length ? t.reading_order : (t?.cells ?? []).map((c) => c.id);
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const r = (ln: Line) => (ln.cell_id != null ? rank.get(ln.cell_id) ?? 1e6 : 1e6);
+  return mine.sort((a, b) => r(a) - r(b) || a.line_in_block - b.line_in_block);
+}
+
+/** Copy the region's text rows into its lines (same number of rows only).
+ *  In a table, each changed cell's text follows its lines. */
 export function textIntoLines(d: Doc, blockId: number): void {
   const el = d.layout.find((e) => e.id === blockId) as any;
   if (!el || typeof el.text !== "string") return;
   const rows = el.text.split("\n").map((r: string) => r.trim()).filter(Boolean);
-  const own = d.lines
-    .filter((ln) => ln.block_id === blockId && ln.cell_id == null)
-    .sort((a, b) => a.line_in_block - b.line_in_block);
+  const own = regionLines(d, blockId);
   if (own.length !== rows.length) return;
-  own.forEach((ln, i) => { ln.text = rows[i]; });
+  const cells = new Set<string>();
+  own.forEach((ln, i) => {
+    if (ln.text.trim() === rows[i]) return;
+    ln.text = rows[i];
+    if (ln.table_index != null && ln.cell_id != null) cells.add(`${ln.table_index}:${ln.cell_id}`);
+  });
+  for (const k of cells) {
+    const [ti, cid] = k.split(":").map(Number);
+    syncCellFromLines(d, ti, cid);
+  }
   el.text = rows.join("\n");
 }
 
 export function syncRegionTextFromLines(d: Doc, blockId: number): void {
   const el = d.layout.find((e) => e.id === blockId) as any;
-  if (!el || el.type === "table" || !("text" in el)) return;
-  const rows = d.lines
-    .filter((ln) => ln.block_id === blockId && ln.cell_id == null)
-    .sort((a, b) => a.line_in_block - b.line_in_block)
-    .map((ln) => (ln.text ?? "").trim())
-    .filter(Boolean);
+  if (!el || !("text" in el)) return;
+  const rows = regionLines(d, blockId).map((ln) => ln.text.trim());
   if (rows.length) el.text = rows.join("\n");
 }
 

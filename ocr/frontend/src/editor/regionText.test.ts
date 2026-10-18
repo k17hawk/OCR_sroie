@@ -73,3 +73,45 @@ describe("text and lines that differ (gov_005 item १८)", () => {
     expect(textVsLines(d, 8)).toBeNull();
   });
 });
+
+import { regionLines } from "./commands";
+
+/** gov_005 table #3: the table text was corrected to "रोजगार", the line still says "रोजार" */
+const table3 = () => {
+  const cell = (id: number, row: number, col: number, text: string) => ({
+    id, row, col, rowspan: 1, colspan: 1, text, is_header: row === 0, handwritten: false, empty: !text,
+    bbox: [col * 300, row * 60, col * 300 + 300, row * 60 + 60], quad: [],
+  });
+  const ln = (id: number, text: string, cell_id: number, i: number, bbox: number[]) => ({
+    id, text, bbox, block_id: 3, line_in_block: i, is_heading: false, font_size: 20, font_id: null,
+    table_index: 0, cell_id, quad: [],
+  });
+  return {
+    layout: [{ id: 3, type: "table", bbox: [0, 0, 600, 120], quad: [], reading_order: 0, table_index: 0,
+               text: "सि.नं\nश्रम तथा रोजगार\nकार्यालयहरु" }],
+    tables: [{ bbox: [0, 0, 600, 120], quad: [], num_rows: 2, num_cols: 2, header_rows: 1, ruling_style: "full",
+               html: "", reading_order: [0, 1, 2, 3],
+               cells: [cell(0, 0, 0, "सि.नं"), cell(1, 0, 1, "श्रम तथा रोजार\nकार्यालयहरु"), cell(2, 1, 0, ""), cell(3, 1, 1, "")] }],
+    // line_in_block out of cell order on purpose: the table text follows the cell reading order
+    lines: [ln(11, "श्रम तथा रोजार", 1, 0, [310, 5, 590, 28]), ln(12, "कार्यालयहरु", 1, 1, [310, 32, 590, 55]),
+            ln(10, "सि.नं", 0, 2, [10, 5, 200, 28])],
+  } as any;
+};
+
+describe("tables: text vs lines (gov_005 #3)", () => {
+  it("the difference is shown for a table too, lines in cell order", () => {
+    const d = table3();
+    expect(regionLines(d, 3).map((l: any) => l.id)).toEqual([10, 11, 12]);
+    const diff = textVsLines(d, 3)!;
+    expect(diff.sameRows).toBe(true);
+    expect(diff.lines).toBe("सि.नं\nश्रम तथा रोजार\nकार्यालयहरु");
+  });
+
+  it("'Copy text into lines' fixes the line and its cell", () => {
+    const d = table3();
+    textIntoLines(d, 3);
+    expect(d.lines.find((l: any) => l.id === 11).text).toBe("श्रम तथा रोजगार");
+    expect(d.tables[0].cells[1].text).toBe("श्रम तथा रोजगार\nकार्यालयहरु");
+    expect(textVsLines(d, 3)).toBeNull();
+  });
+});
