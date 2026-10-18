@@ -205,3 +205,27 @@ def test_check_script_restores_text_from_lines_and_blocks_loss(tmp_path, capsys)
     out = capsys.readouterr().out
     assert "BLOCKED" in out and "प्रदेश: लुम्बिनी" in out
     assert _json.loads(b.read_text(encoding="utf-8")) == full_but_label_line_only  # nothing written
+
+
+def test_merging_duplicate_lines_is_not_a_loss():
+    """doc_0000015: a cell had its OCR line and an automatic whole-cell line, so
+    the table text held its words twice; the editor merged them to one line."""
+    cell = "दर्ता प्रकृयाम रहेको"
+    before = {"layout": [{"id": 5, "type": "table", "table_index": 0, "text": f"सि.नं\n{cell}\n{cell}"}],
+              "lines": [{"block_id": 5, "text": "सि.नं"}, {"block_id": 5, "text": cell}],
+              "tables": [{"cells": [{"text": "सि.नं"}, {"text": cell}]}]}
+    after = copy.deepcopy(before)
+    after["layout"][0]["text"] = f"सि.नं\n{cell}"
+    assert find_text_loss(before, after) == []
+
+
+def test_a_repeated_row_that_really_disappears_is_still_caught():
+    """'०' printed in three cells: losing one of the three lines and cells is a loss."""
+    rows = ["०", "०", "०"]
+    before = {"layout": [{"id": 5, "type": "table", "table_index": 0, "text": "\n".join(rows)}],
+              "lines": [{"block_id": 5, "text": r} for r in rows],
+              "tables": [{"cells": [{"text": r} for r in rows]}]}
+    after = {"layout": [{"id": 5, "type": "table", "table_index": 0, "text": "०\n०"}],
+             "lines": [{"block_id": 5, "text": "०"}] * 2, "tables": [{"cells": [{"text": "०"}] * 2}]}
+    [issue] = find_text_loss(before, after)
+    assert issue["region_id"] == 5

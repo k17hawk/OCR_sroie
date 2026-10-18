@@ -69,6 +69,24 @@ def _missing_passages(old: str, new: str) -> str:
     return " … ".join(parts)
 
 
+def _distinct_rows(text: Any) -> str:
+    """The region text with each row counted once. A region's stored text is
+    built from its lines; when two lines held the same words (old pages: a
+    cell's OCR line plus an automatic whole-cell line) the text has them twice.
+    Merging those lines is not a loss - the lines and cells still carry the
+    real count of every repeated word."""
+    if not isinstance(text, str):
+        return ""
+    seen, out = set(), []
+    for row in text.split("\n"):
+        key = row.strip()
+        if key and key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return "\n".join(out)
+
+
 def _union(*counters: Counter[str]) -> Counter[str]:
     out: Counter[str] = Counter()
     for c in counters:
@@ -82,7 +100,7 @@ def _region_chars(doc: dict[str, Any], el: dict[str, Any]) -> Counter[str]:
     lines = [ln for ln in doc.get("lines") or []
              if isinstance(ln, dict) and ln.get("block_id") == rid]
     parts = [
-        printed_chars(el.get("text"), kind=kind),
+        printed_chars(_distinct_rows(el.get("text")), kind=kind),
         printed_chars("\n".join(str(ln.get("text") or "") for ln in lines)),
     ]
     if kind == "table":

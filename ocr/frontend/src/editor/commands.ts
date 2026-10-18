@@ -605,6 +605,11 @@ export function syncTable(d: Doc, elementId: number, opts: { ruling?: boolean } 
     syncCellFromLines(d, ti, cid);
   }
 
+  // the table's text is its lines (as the server saves it): no stale copies of
+  // lines that were just merged away (old pages had a cell's OCR line AND an
+  // automatic whole-cell line, i.e. its text twice)
+  syncRegionTextFromLines(d, elementId);
+
   const hasRuling = d.ruling_lines.some((rl) => rl.table_index === ti);
   if (opts.ruling || !hasRuling) {
     d.ruling_lines = [
