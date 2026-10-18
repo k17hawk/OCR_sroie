@@ -20,8 +20,65 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
+from app.services import measure as ms
 from app.services.geometry import bbox_to_quad
 from app.services.lines import detect_lines, runs
+
+MIN_SKEW_DEG = 0.2   # below this the page is measured as it is
+
+
+class _PageMap:
+    """Measure on a straightened copy of a tilted page, report in original pixels.
+
+    A tilted scan makes a vertical ruling line drift sideways over the table's
+    height (0.8 deg over 1700 px = 24 px), so it looks like a thick bar and is
+    rejected. find_grid / detect_lines run on ``self.gray`` (deskewed when the
+    page is tilted); ``box`` / ``seg`` map their results back onto the scan.
+    """
+
+    def __init__(self, gray: np.ndarray, box, margin: int = 40):
+        H, W = gray.shape[:2]
+        x0, y0, x1, y1 = [int(v) for v in box]
+        area = [max(0, x0 - margin), max(0, y0 - margin), min(W, x1 + margin), min(H, y1 + margin)]
+        self.angle = 0.0
+        self.gray, self.M, self.Minv = gray, None, None
+        sub = gray[area[1]:area[3], area[0]:area[2]]
+        # a blank area scores every angle 0 and would come back as -max_deg
+        if sub.size and area[2] - area[0] > 20 and area[3] - area[1] > 20 and (sub < 160).mean() > 0.002:
+            ang = ms.estimate_skew(gray, area)
+            if abs(ang) >= MIN_SKEW_DEG:
+                self.angle = float(ang)
+                self.gray, self.M, self.Minv = ms.deskew(gray, ang)
+
+    @property
+    def tilted(self) -> bool:
+        return self.M is not None
+
+    def _apply(self, A, x, y):
+        return (A[0][0] * x + A[0][1] * y + A[0][2], A[1][0] * x + A[1][1] * y + A[1][2])
+
+    def to_deskewed(self, box) -> list[int]:
+        """Page box -> box around it on the straightened page."""
+        if not self.tilted:
+            return [int(v) for v in box]
+        x0, y0, x1, y1 = box
+        pts = [self._apply(self.M, x, y) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+        H, W = self.gray.shape[:2]
+        return [max(0, int(min(p[0] for p in pts))), max(0, int(min(p[1] for p in pts))),
+                min(W, int(round(max(p[0] for p in pts)))), min(H, int(round(max(p[1] for p in pts))))]
+
+    def box(self, b) -> tuple[list[list[int]], list[int]]:
+        """Box measured on the straightened page -> (quad, bbox) on the scan."""
+        b = [int(v) for v in b]
+        if not self.tilted:
+            return bbox_to_quad(b), b
+        return ms.to_original(b, self.Minv)
+
+    def pt(self, x, y) -> list[int]:
+        if not self.tilted:
+            return [int(x), int(y)]
+        px, py = self._apply(self.Minv, x, y)
+        return [int(round(px)), int(round(py))]
 
 
 def union(boxes: list[list[int]]) -> list[int]:
@@ -210,10 +267,12 @@ def _snap_one(gray, rec, blk, html_override, log, info) -> None:
     if not cells:
         log.append(f"block {bid}: no table HTML, skipped")
         return
+    pm = _PageMap(gray, blk["bbox"])
     try:
-        xs, ys, vsegs, hsegs = find_grid(gray, blk["bbox"])
+        xs, ys, vsegs, hsegs = find_grid(pm.gray, pm.to_deskewed(blk["bbox"]))
     except ValueError as e:
-        log.append(f"block {bid}: {e} - skipped")
+        tilt = f" (page tilt {pm.angle:+.2f} deg corrected)" if pm.tilted else ""
+        log.append(f"block {bid}: {e} - skipped{tilt}")
         return
     if len(xs) != n_cols + 1 or len(ys) != n_rows + 1:
         log.append(f"block {bid}: HTML has {n_rows} rows x {n_cols} cols, but the scan shows "
@@ -231,8 +290,9 @@ def _snap_one(gray, rec, blk, html_override, log, info) -> None:
     cells.sort(key=lambda c: (c["row"], c["col"]))
     for cid, c in enumerate(cells):
         c["id"] = cid
-        c["bbox"] = [xs[c["col"]], ys[c["row"]], xs[c["col"] + c["colspan"]], ys[c["row"] + c["rowspan"]]]
-        c["quad"] = bbox_to_quad(c["bbox"])
+        straight = [xs[c["col"]], ys[c["row"]], xs[c["col"] + c["colspan"]], ys[c["row"] + c["rowspan"]]]
+        c["_straight"] = straight            # deskewed box, for measuring inside the cell
+        c["quad"], c["bbox"] = pm.box(straight)
         c["empty"] = not c["text"].strip()
         c["handwritten"] = old_hw.get((c["row"], c["col"]), False)
 
@@ -242,7 +302,7 @@ def _snap_one(gray, rec, blk, html_override, log, info) -> None:
     new_lines = []
     for c in cells:
         # same measurement as region lines; inset 9 keeps the cell borders out
-        bands = detect_lines(gray, c["bbox"], inset=9)
+        bands = detect_lines(pm.gray, c["_straight"], inset=9)
         texts = [x for x in c["text"].split("\n") if x.strip()]
         if not texts:
             if bands:
@@ -255,27 +315,37 @@ def _snap_one(gray, rec, blk, html_override, log, info) -> None:
             pairs = [(" ".join(texts), union(bands) if bands else list(c["bbox"]))]
         else:
             pairs = list(zip(texts, bands))
-        for text, box in pairs:
+        for text, sbox in pairs:
+            quad, box = pm.box(sbox)
             ln = {"text": _nfc(text), "bbox": box, "block_id": bid,
                   "line_in_block": len(new_lines), "is_heading": False,
                   "font_size": round((box[3] - box[1]) * 0.8, 1), "font_id": None,
                   "table_index": ti, "cell_id": c["id"]}
             if c["handwritten"]:
                 ln["handwritten"] = True
-            ln["quad"] = bbox_to_quad(box)
+            ln["quad"] = quad
             new_lines.append(ln)
     rec["lines"] = rest + new_lines
+    for c in cells:
+        c.pop("_straight", None)
 
     # ruling lines: what is actually printed
     rec["ruling_lines"] = [r for r in rec["ruling_lines"] if r.get("table_index") != ti]
-    for y, xa, xb in hsegs:
-        rec["ruling_lines"].append({"table_index": ti, "orientation": "h", "width": 2,
-                                    "p0": [xa, y], "p1": [xb, y], "bbox": [xa, y - 1, xb, y + 1]})
-    for x, ya, yb in vsegs:
-        rec["ruling_lines"].append({"table_index": ti, "orientation": "v", "width": 2,
-                                    "p0": [x, ya], "p1": [x, yb], "bbox": [x - 1, ya, x + 1, yb]})
+    def _rule(orient, p0, p1):
+        p0, p1 = pm.pt(*p0), pm.pt(*p1)
+        bb = [min(p0[0], p1[0]) - 1, min(p0[1], p1[1]) - 1, max(p0[0], p1[0]) + 1, max(p0[1], p1[1]) + 1]
+        if orient == "h":
+            bb[0], bb[2] = bb[0] + 1, bb[2] - 1
+        else:
+            bb[1], bb[3] = bb[1] + 1, bb[3] - 1
+        return {"table_index": ti, "orientation": orient, "width": 2, "p0": p0, "p1": p1, "bbox": bb}
 
-    frame = [xs[0], ys[0], xs[-1], ys[-1]]
+    for y, xa, xb in hsegs:
+        rec["ruling_lines"].append(_rule("h", (xa, y), (xb, y)))
+    for x, ya, yb in vsegs:
+        rec["ruling_lines"].append(_rule("v", (x, ya), (x, yb)))
+
+    frame_quad, frame = pm.box([xs[0], ys[0], xs[-1], ys[-1]])
     header_rows = 0
     while header_rows < n_rows:
         row = [c for c in cells if c["row"] == header_rows]
@@ -283,18 +353,19 @@ def _snap_one(gray, rec, blk, html_override, log, info) -> None:
             break
         header_rows += 1
     new_html = cells_to_html(cells, n_rows)
-    t.update({"bbox": frame, "quad": bbox_to_quad(frame), "num_rows": n_rows, "num_cols": n_cols,
+    t.update({"bbox": frame, "quad": frame_quad, "num_rows": n_rows, "num_cols": n_cols,
               "header_rows": header_rows, "html": new_html,
               "ruling_style": _ruling_style(xs, ys, vsegs, hsegs),
               "reading_order": [c["id"] for c in cells], "cells": cells})
     t.setdefault("theme", None)
     t.setdefault("col_types", None)
-    blk.update({"bbox": frame, "quad": bbox_to_quad(frame), "text": new_html})
+    blk.update({"bbox": frame, "quad": frame_quad, "text": new_html})
     for b in rec.get("blocks") or []:
         if b.get("block_id") == bid:
-            b.update({"bbox": frame, "quad": bbox_to_quad(frame)})
+            b.update({"bbox": frame, "quad": frame_quad})
+    tilt = f", page tilt {pm.angle:+.2f} deg corrected" if pm.tilted else ""
     info.append(f"block {bid}: table {n_rows}x{n_cols} snapped to the scan "
-               f"(rows at y={ys}, cols at x={xs}); {len(cells)} cells, "
+               f"(rows at y={ys}, cols at x={xs}{tilt}); {len(cells)} cells, "
                f"{len(new_lines)} text lines (was {len(old)})")
 
 
