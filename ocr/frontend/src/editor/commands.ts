@@ -267,6 +267,19 @@ function setFormFieldText(d: Doc, el: any, text: string): void {
  * (a deleted line's words no longer linger in the text and block the save).
  * Tables are left to their cells; a region with no lines keeps its text.
  */
+/** "## " for a level-2 heading; "" for anything else. */
+function headingPrefix(el: any): string {
+  return el?.type === "heading" ? "#".repeat(el.level ?? 1) + " " : "";
+}
+
+/** A region's text rows as its lines hold them: a heading's "## " marker
+ *  is markup, not printed text, so it is left out. */
+function textRows(el: any): string[] {
+  let t: string = el.text ?? "";
+  if (el.type === "heading") t = t.replace(/^\s*#+\s*/, "");
+  return t.split("\n").map((r: string) => r.trim()).filter(Boolean);
+}
+
 /**
  * When a region's stored text and its lines disagree (e.g. a page saved by an
  * older version, whose text was built from field labels), the save uses the
@@ -280,7 +293,7 @@ export function textVsLines(d: Doc, blockId: number):
   if (!el || typeof el.text !== "string") return null;
   const own = regionLines(d, blockId).map((ln) => ln.text.trim());
   if (!own.length) return null;
-  const text = el.text.split("\n").map((r: string) => r.trim()).filter(Boolean);
+  const text = textRows(el);
   if (text.join("\n") === own.join("\n")) return null;
   return { text: text.join("\n"), lines: own.join("\n"), sameRows: text.length === own.length };
 }
@@ -309,7 +322,7 @@ export function regionLines(d: Doc, blockId: number): Line[] {
 export function textIntoLines(d: Doc, blockId: number): void {
   const el = d.layout.find((e) => e.id === blockId) as any;
   if (!el || typeof el.text !== "string") return;
-  const rows = el.text.split("\n").map((r: string) => r.trim()).filter(Boolean);
+  const rows = textRows(el);
   const own = regionLines(d, blockId);
   if (own.length !== rows.length) return;
   const cells = new Set<string>();
@@ -322,14 +335,14 @@ export function textIntoLines(d: Doc, blockId: number): void {
     const [ti, cid] = k.split(":").map(Number);
     syncCellFromLines(d, ti, cid);
   }
-  el.text = rows.join("\n");
+  el.text = headingPrefix(el) + rows.join("\n");
 }
 
 export function syncRegionTextFromLines(d: Doc, blockId: number): void {
   const el = d.layout.find((e) => e.id === blockId) as any;
   if (!el || !("text" in el)) return;
   const rows = regionLines(d, blockId).map((ln) => ln.text.trim());
-  if (rows.length) el.text = rows.join("\n");
+  if (rows.length) el.text = headingPrefix(el) + rows.join("\n");
 }
 
 const escapeHtml = (s: string) =>
@@ -690,18 +703,16 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
 
   // the text box shows one row per line; the region's text keeps them as
   // rows ("\n"), as the server does — a new line is never turned into a space
-  if (el.type !== "heading") {
-    el.text = newText.split("\n").map((t) => t.trim()).filter(Boolean).join("\n");
-  }
-
+  // a heading may run over several printed lines (a ministry / department /
+  // address block): each row is a line; only the first row carries "## "
   let displayLines = newText.split("\n");
-
   if (el.type === "heading") {
-    const prefix = "#".repeat(el.level ?? 1) + " ";
-    if (displayLines[0]?.startsWith(prefix)) {
-      displayLines[0] = displayLines[0].slice(prefix.length);
-    }
-    displayLines = [displayLines[0] ?? ""];
+    displayLines[0] = (displayLines[0] ?? "").replace(/^\s*#+\s*/, "");
+    // the lines keep an empty row just typed (Enter), like a paragraph's;
+    // the text skips it
+    el.text = headingPrefix(el) + displayLines.map((t) => t.trim()).filter(Boolean).join("\n");
+  } else {
+    el.text = newText.split("\n").map((t) => t.trim()).filter(Boolean).join("\n");
   }
 
   const existing = d.lines

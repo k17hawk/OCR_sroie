@@ -143,11 +143,13 @@ function elementText(el: LayoutElement, doc: Doc): string {
   if (el.type === "table") return tableText(doc, el);
   // a region made of OCR lines: one row per line, so editing keeps the lines
   // (its own text joins them with a space and would merge them into one)
-  if (el.type !== "heading" && el.type !== "list") {
+  if (el.type !== "list") {
     const own = doc.lines
       .filter((ln) => ln.block_id === el.id)
       .sort((a, b) => a.line_in_block - b.line_in_block);
-    if (own.length > 1) return own.map((ln) => ln.text).join("\n");
+    // a heading over several lines: "## " on the first row, as typed
+    const mark = el.type === "heading" ? "#".repeat((el as any).level ?? 1) + " " : "";
+    if (own.length > 1) return mark + own.map((ln) => ln.text).join("\n");
   }
   const own = "text" in el ? ((el as any).text as string) : "";
   if (own && own.length > 0) return own;
