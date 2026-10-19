@@ -3,6 +3,12 @@ import { produce, enableMapSet } from "immer";
 import type { Doc, LoadWarning, Project } from "./types";
 import type { TableSuggestion } from "./api";
 import { LAYER_DEFAULTS, type LayerKey } from "./lib";
+import { dropOrphanTables } from "./editor/orphanTables";
+
+/** A page from the server may carry tables whose region was deleted earlier: drop them. */
+function withoutOrphanTables(doc: Doc): Doc {
+  return produce(doc, (d) => { dropOrphanTables(d); });
+}
 
 enableMapSet();
 
@@ -150,7 +156,7 @@ export const useStore = create<State>((set, get) => ({
 
   load: (doc, revision, imageUrl) =>
     set({
-      doc,
+      doc: withoutOrphanTables(doc),
       revision,
       imageUrl,
       dirty: false,
@@ -170,7 +176,7 @@ export const useStore = create<State>((set, get) => ({
       return;
     }
     set({
-      doc,
+      doc: withoutOrphanTables(doc),
       revision,
       imageUrl,
       serverRevision: revision,
@@ -182,15 +188,27 @@ export const useStore = create<State>((set, get) => ({
   },
 
   edit: (recipe) => {
-    const { doc, past } = get();
+    const { doc, past, selection } = get();
     if (!doc) return;
-    const next = produce(doc, recipe);
+    // every edit that removes a table region (delete, type change, …) also
+    // removes its table data, so nothing is drawn or saved for it
+    const res: { moved: Map<number, number> | null } = { moved: null };
+    const next = produce(doc, (d) => {
+      recipe(d);
+      res.moved = dropOrphanTables(d);
+    });
     if (next === doc) return; // no-op
+    let sel = selection;
+    if (res.moved && sel?.kind === "cell") {
+      const ni = res.moved.get(sel.tableIndex);
+      sel = ni === undefined ? null : { ...sel, tableIndex: ni };
+    }
     set({
       doc: next,
       past: [...past.slice(-50), doc],
       future: [],
       dirty: true,
+      ...(sel !== selection ? { selection: sel } : {}),
     });
   },
 

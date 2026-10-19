@@ -139,9 +139,54 @@ def region_text_from_lines(lines: list[Line]) -> str | None:
     return "\n".join(texts) if texts else None
 
 
+def drop_orphan_tables(doc: Doc) -> dict[int, int]:
+    """Remove tables no table region points at any more, in place.
+
+    Deleting a table region (or changing its type) used to leave its entry in
+    ``doc.tables`` - with its cells, ruling lines and cell lines - so the saved
+    JSON kept tables that are not in the layout tree, and the editor drew them.
+    Kept tables are re-indexed in order; ``table_index`` on table regions,
+    lines and ruling lines follows. Lines of a dropped table go too, unless
+    their region still exists (then they just lose their cell link).
+    Returns ``{old_index: new_index}`` for the kept tables.
+    """
+    n = len(doc.tables)
+    used = sorted({el.table_index for el in doc.layout
+                   if isinstance(el, TableLayout) and 0 <= el.table_index < n})
+    remap = {old: new for new, old in enumerate(used)}
+    if len(used) == n:
+        return remap
+    doc.tables = [doc.tables[i] for i in used]
+    for el in doc.layout:
+        if isinstance(el, TableLayout) and el.table_index in remap:
+            el.table_index = remap[el.table_index]
+    region_ids = {el.id for el in doc.layout}
+    kept_lines = []
+    for ln in doc.lines:
+        if ln.table_index is not None and ln.table_index not in remap:
+            if ln.block_id not in region_ids:
+                continue                      # belonged to the deleted table only
+            ln.table_index = None
+            ln.cell_id = None
+        elif ln.table_index is not None:
+            ln.table_index = remap[ln.table_index]
+        kept_lines.append(ln)
+    doc.lines = kept_lines
+    kept_rules = []
+    for r in doc.ruling_lines:
+        if r.table_index in remap:
+            r.table_index = remap[r.table_index]
+            kept_rules.append(r)
+    doc.ruling_lines = kept_rules
+    return remap
+
+
 def finalize(doc: Doc) -> Doc:
     """Recompute every derived field on a deep copy of ``doc`` and return it."""
     doc = doc.model_copy(deep=True)
+
+    # 0) Tables whose region was deleted are not part of the page.
+    drop_orphan_tables(doc)
 
     # Index lines by block, in reading order inside the block.
     lines_by_block = _lines_by_block(doc)
