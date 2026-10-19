@@ -921,9 +921,7 @@ function FormFieldEditor({ el }: { el: any }) {
               </Labeled>
 
               {f.field_type !== "checkbox" && !f.value && (
-                <div className="text-[10px] text-slate-500">
-                  no value area — draw one over the blank / leader
-                </div>
+                <DrawValueButton elementId={el.id} fieldIndex={i} />
               )}
 
               {f.value && (
@@ -970,6 +968,36 @@ function FormFieldEditor({ el }: { el: any }) {
           + field
         </button>
       </Section>
+    </div>
+  );
+}
+
+/**
+ * A field without a value box has nothing to click on the page and nowhere
+ * to mark the answer handwritten. This arms the Form field tool so the next
+ * box drawn becomes this field's value; Esc / another tool cancels.
+ */
+function DrawValueButton({ elementId, fieldIndex }: { elementId: number; fieldIndex: number }) {
+  const valueTarget = useStore((s) => s.valueTarget);
+  const setValueTarget = useStore((s) => s.setValueTarget);
+  const setTool = useStore((s) => s.setTool);
+  const armed = valueTarget?.elementId === elementId && valueTarget.fieldIndex === fieldIndex;
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] text-slate-500">no value area yet</div>
+      <button
+        onClick={() => {
+          if (armed) { setValueTarget(null); setTool("select"); return; }
+          setTool("form-field");
+          setValueTarget({ elementId, fieldIndex });
+        }}
+        className={
+          "w-full rounded py-0.5 text-[10px] " +
+          (armed ? "bg-amber-600 text-white" : "bg-slate-800 text-sky-300 hover:bg-slate-700")
+        }
+      >
+        {armed ? "drag a box over the answer… (click to cancel)" : "+ draw value box"}
+      </button>
     </div>
   );
 }
@@ -1290,6 +1318,12 @@ function FieldEditor({
           className="w-full rounded bg-slate-800 px-2 py-1 font-deva text-slate-100"
         />
       </Section>
+
+      {field.field_type !== "checkbox" && !field.value && (
+        <Section label="value">
+          <DrawValueButton elementId={elementId} fieldIndex={fieldIndex} />
+        </Section>
+      )}
 
       {field.value && (
         <>

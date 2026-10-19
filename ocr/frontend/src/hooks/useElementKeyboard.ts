@@ -38,6 +38,8 @@ export function useElementKeyboard() {
       const doc = s.doc;
 
       if (e.key === "Escape") {
+        // first Esc cancels a pending "draw value box"
+        if (s.valueTarget) { s.setValueTarget(null); s.setTool("select"); return; }
         s.setSelection(null);
         return;
       }

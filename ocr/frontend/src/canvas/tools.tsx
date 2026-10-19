@@ -11,6 +11,24 @@ import { lineParent, snapChildToInk } from "../editor/snapToInk";
 
 type Pt = [number, number];
 
+const quadFromBBox = (b: BBox): Quad =>
+  [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]] as Quad;
+
+function iou(a: BBox, b: BBox): number {
+  const w = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+  const h = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const inter = w * h;
+  const area = (x: BBox) => (x[2] - x[0]) * (x[3] - x[1]);
+  const uni = area(a) + area(b) - inter;
+  return uni > 0 ? inter / uni : 0;
+}
+
+function valueOf(d: any, elementId: number, fieldIndex: number) {
+  const t = d.layout.find((e: any) => e.id === elementId);
+  const v = t?.type === "form_field" ? t.fields[fieldIndex]?.value : null;
+  return v && "bbox" in v ? (v as { bbox: BBox; quad?: Quad }) : undefined;
+}
+
 interface DrawPreview {
   mode: "box" | "quad" | "polyline";
   points: Pt[];
@@ -28,6 +46,9 @@ export function useDrawingTools() {
   const edit = useStore((s) => s.edit);
   const selection = useStore((s) => s.selection);
   const setSelection = useStore((s) => s.setSelection);
+  const valueTarget = useStore((s) => s.valueTarget);
+  const setValueTarget = useStore((s) => s.setValueTarget);
+  const setTool = useStore((s) => s.setTool);
 
   const start = useRef<Pt | null>(null);
   const [preview, setPreview] = useState<DrawPreview | null>(null);
@@ -86,26 +107,54 @@ export function useDrawingTools() {
     if (bbox[2] - bbox[0] < 6 || bbox[3] - bbox[1] < 6) return;
 
     if (tool === "form-field") {
+      // "Draw value box" on an existing field: this box is that field's value
+      if (valueTarget) {
+        const { elementId, fieldIndex } = valueTarget;
+        let ok = false;
+        edit((d) => {
+          const t = d.layout.find((e) => e.id === elementId) as any;
+          const f = t?.type === "form_field" ? t.fields[fieldIndex] : undefined;
+          if (!f) return;
+          f.value = {
+            text: "", bbox, quad: quadFromBBox(bbox), handwritten: false, empty: true,
+          };
+          // the field's region grows to hold its value
+          t.bbox = [
+            Math.min(t.bbox[0], bbox[0]), Math.min(t.bbox[1], bbox[1]),
+            Math.max(t.bbox[2], bbox[2]), Math.max(t.bbox[3], bbox[3]),
+          ];
+          t.quad = quadFromBBox(t.bbox);
+          ok = true;
+        });
+        setValueTarget(null);
+        setTool("select");
+        if (ok) {
+          setSelection({ kind: "field", elementId, fieldIndex });
+          void snapChildToInk({ get: (d) => valueOf(d, elementId, fieldIndex), parent: (d) => d.layout.find((e) => e.id === elementId)?.bbox as BBox | undefined }, bbox, mods.alt);
+        }
+        return;
+      }
       if (formStage === "label") {
         setFormLabelBox(bbox);
         setFormStage("value");
         return;
       }
-      // Second click: value box. Commit.
+      // Second box: value box. Commit.
       const labelBox = formLabelBox!;
+      let newId = -1;
       edit((d) => {
-        const id = addFormField(d, labelBox, bbox);
-        // If the two boxes overlap heavily, treat as "no value".
-        if (
-          Math.abs(labelBox[0] - bbox[0]) < 4 &&
-          Math.abs(labelBox[2] - bbox[2]) < 4
-        ) {
-          const el = d.layout.find((e) => e.id === id) as any;
+        newId = addFormField(d, labelBox, bbox);
+        // the second box drawn over (almost) the same spot as the label means
+        // "no value". Compare the whole box: a value written right under its
+        // label has the same left/right edges and must be kept.
+        if (iou(labelBox, bbox) > 0.8) {
+          const el = d.layout.find((e) => e.id === newId) as any;
           el.fields[0].value = null;
         }
       });
       setFormLabelBox(null);
       setFormStage("label");
+      if (newId >= 0) setSelection({ kind: "field", elementId: newId, fieldIndex: 0 });
       return;
     }
 

@@ -106,6 +106,10 @@ interface State {
 
   tool: Tool;
   setTool: (t: Tool) => void;
+  /** existing form field waiting for its value box: the next box drawn with
+   *  the Form field tool becomes that field's value (not a new field) */
+  valueTarget: { elementId: number; fieldIndex: number } | null;
+  setValueTarget: (t: { elementId: number; fieldIndex: number } | null) => void;
   drawTypeDefault: string;
   setDrawTypeDefault: (t: string) => void;
 
@@ -249,7 +253,10 @@ export const useStore = create<State>((set, get) => ({
   setSelection: (selection) => set({ selection }),
 
   tool: "select",
-  setTool: (tool) => set({ tool }),
+  // leaving the Form field tool cancels a pending "draw value box"
+  setTool: (tool) => set((st) => ({ tool, valueTarget: tool === "form-field" ? st.valueTarget : null })),
+  valueTarget: null,
+  setValueTarget: (valueTarget) => set({ valueTarget }),
   drawTypeDefault: "paragraph",
   setDrawTypeDefault: (drawTypeDefault) => set({ drawTypeDefault }),
 
