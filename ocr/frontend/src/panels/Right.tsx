@@ -15,6 +15,7 @@ import { typeColor, prettyType } from "../hooks/useProjectTypes";
 import { PropertiesEditor } from "../editor/PropertiesEditor";
 import { DocTypePicker } from "../editor/DocTypePicker";
 import { DetectLinesButton } from "../editor/DetectLinesButton";
+import { useSpell } from "../spell/useSpell";
 
 const TABS: {
   id: "properties" | "tree" | "readingOrder" | "pageMeta" | "json";
@@ -55,6 +56,7 @@ export function RightPanel() {
         {!doc && <div className="text-xs text-slate-500">Loading…</div>}
         {doc && tab === "properties" && (
           <>
+            <SpellToggle />
             <DetectLinesButton />
             <PropertiesEditor doc={doc} />
           </>
@@ -65,6 +67,49 @@ export function RightPanel() {
         {doc && tab === "json" && <JsonPanel doc={doc} />}
       </div>
     </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Spell check switch
+// ---------------------------------------------------------------------------
+
+/** Turns Nepali spell checking of the text boxes on / off (remembered). */
+function SpellToggle() {
+  const enabled = useSpell((s) => s.enabled);
+  const status = useSpell((s) => s.status);
+  const error = useSpell((s) => s.error);
+  const setEnabled = useSpell((s) => s.setEnabled);
+  const userWords = useSpell((s) => s.userWords);
+  const removeWord = useSpell((s) => s.removeWord);
+  const [showWords, setShowWords] = useState(false);
+  return (
+    <div className="mb-2 rounded border border-slate-800 px-2 py-1 text-[11px]">
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-2 text-slate-300">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Spell check (Nepali)
+        </label>
+        {enabled && status === "loading" && <span className="text-[10px] text-slate-500">loading dictionary…</span>}
+        {enabled && status === "error" && <span className="text-[10px] text-rose-400" title={error ?? ""}>failed to load</span>}
+        {enabled && userWords.length > 0 && (
+          <button type="button" onClick={() => setShowWords(!showWords)}
+            className="ml-auto text-[10px] text-slate-500 hover:text-slate-300">
+            my words ({userWords.length})
+          </button>
+        )}
+      </div>
+      {enabled && showWords && (
+        <ul className="mt-1 flex flex-wrap gap-1">
+          {userWords.map((w) => (
+            <li key={w} className="flex items-center gap-1 rounded bg-slate-800 px-1.5 font-deva text-[11px] text-slate-200">
+              {w}
+              <button type="button" onClick={() => removeWord(w)} className="text-slate-500 hover:text-rose-300" title="Remove from my dictionary">×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
