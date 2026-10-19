@@ -107,7 +107,14 @@ def _page_row(
         prepared, orig, text_layer, legacy = get_page()
         if image_key is None:
             image_key = img_service.store_image_at(base, prepared)
-        n = doc_store.next_document_number()
+        # the page's .jsonl was deleted but its entry is still in the index:
+        # start the page again under its old number instead of adding a
+        # second entry that points at the same file
+        stale = doc_store.ids_for_doc_key(doc_key)
+        n = (doc_store._parse_number(stale[0]) if stale
+             else doc_store.next_document_number())
+        for extra in stale[1:]:
+            doc_store._retire(extra, f"same page file {doc_key} as {stale[0]}")
         doc = make_skeleton(
             n=n, image_ext=prepared.save_ext,
             width=prepared.width, height=prepared.height,
@@ -115,6 +122,8 @@ def _page_row(
             language=project.default_language,
             quality=quality_metrics.compute_quality(prepared.image, orig),
         ).model_copy(update={"image": image_key})
+        if stale:
+            doc = doc.model_copy(update={"document_id": stale[0]})
         document_id = doc.document_id
 
     row = doc_store.DocumentRow(

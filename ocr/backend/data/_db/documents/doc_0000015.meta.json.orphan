@@ -1,0 +1,17 @@
+{
+  "document_id": "doc_0000015",
+  "project_id": 1,
+  "doc_number": 15,
+  "revision": 35,
+  "status": "in_progress",
+  "image_key": "manual_annotation/238417529-month kartik 76/238417529-month kartik 76_page1.jpg",
+  "sha256": "113d8bafc1abc5deab55ff19a5f72dccfcb62caf59d6973aba3d409a03c087d5",
+  "source_file_id": null,
+  "source_filename": "238417529-month kartik 76.jpg",
+  "text_layer": null,
+  "legacy_font": null,
+  "doc_key": "manual_annotation/238417529-month kartik 76/238417529-month kartik 76_page1.jsonl",
+  "source_stem": "238417529-month kartik 76",
+  "created_at": "2026-10-17T16:37:06.068105+00:00",
+  "updated_at": "2026-10-19T02:13:05.105773+00:00"
+}

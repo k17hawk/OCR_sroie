@@ -208,3 +208,33 @@ def test_old_page_file_loads_with_mapping_warnings_and_saves_new_form(client):
     assert stored["layout"][0]["type"] == "paragraph"
     assert "text_line" not in jl.read_text()
     assert client.get(f"/documents/{ids[0]}").json()["warnings"] == []
+
+
+def _listed(c, pid):
+    return [d["document_id"] for d in c.get(f"/projects/{pid}/documents").json()]
+
+
+def test_reupload_after_deleting_page_jsonl_keeps_one_entry(client):
+    """Deleting a page's .jsonl by hand and uploading the file again used to
+    add a second entry pointing at the same file (two rows, one unclickable)."""
+    pid = _project(client)
+    first = _upload(client, pid, "form_a.jpg", _jpg())["document_ids"][0]
+    _, jl = _page(client, "form_a", 1)
+    jl.unlink()
+    again = _upload(client, pid, "form_a.jpg", _jpg())["document_ids"]
+    assert again == [first]
+    assert _listed(client, pid) == [first]
+    assert client.get(f"/documents/{first}").json()["doc"]["document_id"] == first
+
+
+def test_list_repairs_entries_sharing_a_page_file(client):
+    """Pages already duplicated by the old behaviour are cleaned up when the
+    list is read: the entry the file names is kept, the other retired."""
+    pid = _project(client)
+    keep = _upload(client, pid, "form_c.jpg", _jpg())["document_ids"][0]
+    docs = client.root / "_db" / "documents"
+    meta = json.loads((docs / f"{keep}.meta.json").read_text(encoding="utf-8"))
+    meta["document_id"] = "doc_0000099"
+    (docs / "doc_0000099.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert _listed(client, pid) == [keep]
+    assert (docs / "doc_0000099.meta.json.orphan").exists()

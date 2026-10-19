@@ -285,6 +285,52 @@ def rows_for_stem(project_id: int | None, stem: str) -> list[DocumentRow]:
     return out
 
 
+def ids_for_doc_key(doc_key: str) -> list[str]:
+    """Every document whose metadata points at this page file (normally
+    one; more after a page's .jsonl was deleted by hand and uploaded again)."""
+    root = _root() / "documents"
+    out: list[str] = []
+    for meta_path in sorted(root.glob("*.meta.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if meta.get("doc_key") == doc_key:
+            out.append(meta_path.name[: -len(".meta.json")])
+    return out
+
+
+def _retire(document_id: str, why: str) -> None:
+    """Take a duplicate entry out of the list. Its metadata is kept next to
+    the others as <id>.meta.json.orphan, so nothing is lost; the page file
+    itself belongs to the entry that was kept."""
+    meta = _meta_path(document_id)
+    if meta.exists():
+        os.replace(meta, meta.with_name(meta.name + ".orphan"))
+    log.warning("%s: %s; moved its metadata to %s.meta.json.orphan", document_id, why, document_id)
+    append_audit({"event": "retire_duplicate", "document_id": document_id, "reason": why})
+
+
+def _dedupe_by_doc_key(rows: list[DocumentRow]) -> list[DocumentRow]:
+    """Entries that share one page file are one page. Keep the entry the
+    file itself names (its ``document_id``), else the most recently saved."""
+    by_key: dict[str, list[DocumentRow]] = {}
+    for r in rows:
+        if r.doc_key:
+            by_key.setdefault(r.doc_key, []).append(r)
+    drop: set[str] = set()
+    for key, group in by_key.items():
+        if len(group) < 2:
+            continue
+        named = [r for r in group if r.document_id == r.doc.document_id]
+        keep = named[0] if named else max(group, key=lambda r: r.updated_at)
+        for r in group:
+            if r is not keep:
+                _retire(r.document_id, f"same page file {key} as {keep.document_id}")
+                drop.add(r.document_id)
+    return [r for r in rows if r.document_id not in drop]
+
+
 def list_for_project(project_id: int) -> list[DocumentRow]:
     root = _root() / "documents"
     out: list[DocumentRow] = []
@@ -303,6 +349,7 @@ def list_for_project(project_id: int) -> list[DocumentRow]:
             continue
         if row is not None:
             out.append(row)
+    out = _dedupe_by_doc_key(out)
     out.sort(key=lambda r: r.doc_number)
     return out
 

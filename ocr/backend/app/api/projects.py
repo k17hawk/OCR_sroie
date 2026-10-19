@@ -133,6 +133,8 @@ def list_documents(
             status=row.status,
             image_url=storage.url(row.image_key),
             source_file_id=row.source_file_id,
+            source_filename=row.source_filename,
+            updated_at=row.updated_at,
         ))
     return out
 
@@ -181,6 +183,8 @@ async def upload_images(
                 status=row.status,
                 image_url=storage.url(row.image_key),
                 source_file_id=row.source_file_id,
+                source_filename=row.source_filename,
+                updated_at=row.updated_at,
             ))
 
     return UploadResponse(results=results, documents=documents)

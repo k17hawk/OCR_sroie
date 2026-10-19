@@ -82,6 +82,8 @@ class DocumentHeader(BaseModel):
     status: str
     image_url: str
     source_file_id: str | None = None
+    source_filename: str | None = None
+    updated_at: str | None = None
 
 
 class DocumentRead(BaseModel):

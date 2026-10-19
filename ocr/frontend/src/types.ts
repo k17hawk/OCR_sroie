@@ -442,6 +442,9 @@ export interface DocumentSummary {
   revision: number;
   status: string;
   image_url: string;
+  source_file_id?: string | null;
+  source_filename?: string | null;
+  updated_at?: string | null;
 }
 
 export type ConflictState =
