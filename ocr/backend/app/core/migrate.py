@@ -41,7 +41,6 @@ LEGACY_TYPES: dict[str, tuple[str, str | None]] = {
     "form_label": ("form_field", None),
     "form_value": ("form_field", None),
     "label": ("form_field", None),
-    "page_number": ("footer", None),
     "signature_caption": ("caption", None),
     "table_footer": ("caption", None),
     "handwritten_annotation": ("handwriting", "annotation"),

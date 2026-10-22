@@ -21,6 +21,7 @@ export function emptyLayout(type: string, bbox: BBox, id: number): LayoutElement
     case "footer":   return { ...base, type: "footer" };
     case "paragraph":return { ...base, type: "paragraph" };
     case "caption":  return { ...base, type: "caption" };
+    case "page_number": return { ...base, type: "page_number" };
     case "heading":  return { ...base, type: "heading", level: 2, text: "# " };
     case "figure":   return { ...base, type: "figure", subtype: "photo", text: "<figure/>" };
     case "form_field":
@@ -28,7 +29,8 @@ export function emptyLayout(type: string, bbox: BBox, id: number): LayoutElement
     case "table":
       return { ...base, type: "table", table_index: -1 };
     case "list":
-      return { ...base, type: "list", list_style: "bullet", items: [] };
+    case "sublist":
+      return { ...base, type, list_style: "bullet", items: [] } as any;
     case "logo":      return { ...base, type: "logo" } as any;
     case "signature": return { ...base, type: "signature", signer: "other", text: "" } as any;
     case "stamp":     return { ...base, type: "stamp", stamp_text: "" };
@@ -164,7 +166,7 @@ export function addLine(d: Doc, bbox: BBox, blockId: number | null): number {
   const parent = d.layout.find((e) => e.id === parentId) as any;
   // a line drawn in a list (an item's marker "क)" / "•", or its words) joins
   // the item whose lines it sits beside; otherwise it is kept unassigned
-  if (parent?.type === "list") {
+  if (parent?.type === "list" || parent?.type === "sublist") {
     const item = listItemBeside(d, parentId!, bbox);
     if (item != null) {
       line.list_level = (parent.items?.[item]?.level as number) ?? 0;
@@ -684,7 +686,7 @@ export function setElementText(d: Doc, elementId: number, newText: string): void
   // A list's text and its items must stay in sync: the server rebuilds the
   // text from `items` on every save, so text typed here without updating
   // the items was thrown away.
-  if (el.type === "list") {
+  if (el.type === "list" || el.type === "sublist") {
     const known = (el.items ?? []).flatMap((it: ListItemData) =>
       (it.children ?? []).map((id) => ({ id, text: childTextOf(d, id) })));
     el.items = listItemsFromText(newText, known);
@@ -1101,7 +1103,7 @@ export function listTextFromItems(items: ListItemData[], d?: Doc | null): string
 
 /** Call after changing a list's items so its text matches. */
 export function syncListText(el: any, d?: Doc | null): void {
-  if (el && el.type === "list" && Array.isArray(el.items)) el.text = listTextFromItems(el.items, d);
+  if (el && (el.type === "list" || el.type === "sublist") && Array.isArray(el.items)) el.text = listTextFromItems(el.items, d);
 }
 
 /**
@@ -1112,7 +1114,7 @@ export function syncListText(el: any, d?: Doc | null): void {
  */
 export function linkListChildren(d: Doc, listId: number): void {
   const el = d.layout.find((e) => e.id === listId) as any;
-  if (!el || el.type !== "list") return;
+  if (!el || (el.type !== "list" && el.type !== "sublist")) return;
   const ids = new Set(d.layout.map((e) => e.id));
   const owned = new Map<number, number>();
   el.items.forEach((it: ListItemData, i: number) => {
@@ -1136,7 +1138,7 @@ export function linkListChildren(d: Doc, listId: number): void {
 /** Attach a box to item `itemIndex` of a list (moving it from any other item). */
 export function attachToListItem(d: Doc, listId: number, itemIndex: number, childId: number): void {
   for (const e of d.layout as any[]) {
-    if (e.type !== "list") continue;
+    if (e.type !== "list" && e.type !== "sublist") continue;
     for (const it of e.items as ListItemData[]) {
       if (it.children) it.children = it.children.filter((c) => c !== childId);
     }
@@ -1144,7 +1146,7 @@ export function attachToListItem(d: Doc, listId: number, itemIndex: number, chil
   const el = d.layout.find((e) => e.id === listId) as any;
   if (!el?.items?.[itemIndex]) return;
   (el.items[itemIndex].children ??= []).push(childId);
-  for (const e of d.layout as any[]) if (e.type === "list") linkListChildren(d, e.id);
+  for (const e of d.layout as any[]) if (e.type === "list" || e.type === "sublist") linkListChildren(d, e.id);
   afterListChange(d, listId);
 }
 
@@ -1169,7 +1171,7 @@ export function listChildCandidates(d: Doc, listId: number): any[] {
     return (ix * iy) / a >= 0.8;
   };
   return (d.layout as any[]).filter(
-    (e) => e.id !== listId && e.type !== "list" && inside(e.bbox, el.bbox),
+    (e) => e.id !== listId && e.type !== "list" && inside(e.bbox, el.bbox) /* a sublist may sit under an item */,
   );
 }
 
@@ -1208,7 +1210,7 @@ export function autoAttachListChildren(d: Doc, listId: number): number {
  */
 export function syncListLines(d: Doc, listId: number): void {
   const el = d.layout.find((e) => e.id === listId) as any;
-  if (!el || el.type !== "list") return;
+  if (!el || (el.type !== "list" && el.type !== "sublist")) return;
   const items: ListItemData[] = el.items ?? [];
   const old = d.lines
     .filter((ln) => ln.block_id === listId)

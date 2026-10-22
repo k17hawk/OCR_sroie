@@ -414,6 +414,11 @@ class ListLayout(_Region):
     quad: Quad
 
 
+class SublistLayout(ListLayout):
+    """A list nested under another list's item: same properties as a list."""
+    type: Literal["sublist"] = "sublist"
+
+
 class LogoLayout(_Region):
     id: int
     type: Literal["logo"] = "logo"
@@ -450,7 +455,7 @@ LayoutElement = Annotated[
     Union[
         HeaderLayout, TitleLayout, HeadingLayout, SubheadingLayout, ParagraphLayout,
         FooterLayout, PageNumberLayout, SignatureCaptionLayout,
-        FigureLayout, TableLayout, TableHeadingLayout, TableFooterLayout, ListLayout,
+        FigureLayout, TableLayout, TableHeadingLayout, TableFooterLayout, ListLayout, SublistLayout,
         FormFieldLayout, FormLabelLayout, FormValueLayout, LabelLayout, OptionsLayout,
         LogoLayout, SignatureLayout, StampLayout,
         HandwritingLayout, HandwrittenAnnotationLayout, HandwrittenCorrectionLayout,
@@ -463,7 +468,7 @@ REGION_TYPES: tuple[str, ...] = tuple(
     m.model_fields["type"].default for m in LayoutElement.__origin__.__args__  # type: ignore[attr-defined]
 )
 # Region types that may carry fields[] (A1)
-FIELD_REGION_TYPES = ("form_field", "table", "list")
+FIELD_REGION_TYPES = ("form_field", "table", "list", "sublist")
 # Removed in 2.1; the migration maps them (A1)
 REMOVED_REGION_TYPES = ("text_line", "list_item")
 

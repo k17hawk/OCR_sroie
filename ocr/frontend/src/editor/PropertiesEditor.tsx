@@ -143,7 +143,7 @@ function elementText(el: LayoutElement, doc: Doc): string {
   if (el.type === "table") return tableText(doc, el);
   // a region made of OCR lines: one row per line, so editing keeps the lines
   // (its own text joins them with a space and would merge them into one)
-  if (el.type !== "list") {
+  if ((el.type !== "list" && el.type !== "sublist")) {
     const own = doc.lines
       .filter((ln) => ln.block_id === el.id)
       .sort((a, b) => a.line_in_block - b.line_in_block);
@@ -314,7 +314,7 @@ function applyTypeChange(d: Doc, id: number, next: string) {
       d.tables.push(emptyTable(target.bbox));
     }
   }
-  if (next === "list") {
+  if (next === "list" || next === "sublist") {
     if (!Array.isArray(target.items) || target.items.length === 0) {
       const txt = typeof target.text === "string" ? target.text : "";
       target.items = listItemsFromText(txt);
@@ -683,7 +683,7 @@ function LayoutEditor({ doc, el }: { doc: Doc; el: LayoutElement }) {
         </Section>
       )}
 
-      {el.type === "list" && <ListEditor doc={doc} el={el} />}
+      {(el.type === "list" || el.type === "sublist") && <ListEditor doc={doc} el={el} />}
       {el.type === "form_field" && <FormFieldEditor el={el} />}
 
       {el.type === "table" && (

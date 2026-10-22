@@ -33,10 +33,10 @@ def messages(warns):
 # region types
 # ---------------------------------------------------------------------------
 
-def test_enum_is_the_sixteen_region_types():
+def test_enum_is_the_eighteen_region_types():
     assert REGION_TYPES == {
-        "title", "heading", "subheading", "paragraph", "list", "form_field", "table",
-        "table_heading", "header", "footer", "figure", "logo", "stamp", "signature",
+        "title", "heading", "subheading", "paragraph", "list", "sublist", "form_field", "table",
+        "table_heading", "header", "footer", "page_number", "figure", "logo", "stamp", "signature",
         "handwriting", "caption",
     }
 

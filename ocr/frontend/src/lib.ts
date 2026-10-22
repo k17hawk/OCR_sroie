@@ -11,11 +11,13 @@ export const TYPE_COLORS: Record<LayoutType, string> = {
   form_field: "#06b6d4",
   table: "#ef4444",
   list: "#eab308",
+  sublist: "#f59e0b",
   logo: "#94a3b8",
   signature: "#ec4899",
   stamp: "#a16207",
   footer: "#14b8a6",
   caption: "#f472b6",
+  page_number: "#64748b",
   handwriting: "#059669",
 };
 

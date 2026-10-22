@@ -46,7 +46,7 @@ def printed_chars(text: str | None, *, kind: str = "") -> Counter[str]:
         t = html.unescape(_TAG.sub(" ", t.replace("<br>", "\n")))
     if kind == "heading":
         t = _HEADING_MARK.sub("", t)
-    if kind == "list":
+    if kind in ("list", "sublist"):
         t = _LIST_DASH.sub("", t)
     if kind == "figure":
         t = t.replace("<figure/>", "")
@@ -110,7 +110,7 @@ def _region_chars(doc: dict[str, Any], el: dict[str, Any]) -> Counter[str]:
             cells = tables[ti].get("cells") or []
             parts.append(printed_chars("\n".join(str(c.get("text") or "") for c in cells
                                                  if isinstance(c, dict))))
-    if kind == "list":
+    if kind in ("list", "sublist"):
         items = el.get("items") or []
         parts.append(printed_chars("\n".join(str(i.get("text") or "") for i in items
                                              if isinstance(i, dict))))

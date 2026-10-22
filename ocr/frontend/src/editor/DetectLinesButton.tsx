@@ -3,7 +3,7 @@ import { detectLines } from "../api";
 import { useStore } from "../store";
 
 const TEXT_TYPES = new Set([
-  "paragraph", "header", "title", "heading", "subheading", "list", "list_item",
+  "paragraph", "header", "title", "heading", "subheading", "list", "sublist", "list_item",
   "form_field", "table_heading", "footer", "page_number",
 ]);
 

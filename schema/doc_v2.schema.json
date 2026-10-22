@@ -1531,6 +1531,93 @@
       "title": "NormalFieldValue",
       "type": "object"
     },
+    "PageNumberLayout": {
+      "additionalProperties": false,
+      "description": "The printed page number (१, 2, \"पृष्ठ ३\", …).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "page_number",
+          "default": "page_number",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "quad"
+      ],
+      "title": "PageNumberLayout",
+      "type": "object"
+    },
     "ParagraphLayout": {
       "additionalProperties": false,
       "properties": {
@@ -2134,6 +2221,121 @@
       "title": "SubheadingLayout",
       "type": "object"
     },
+    "SublistLayout": {
+      "additionalProperties": false,
+      "description": "A list nested under another list's item: same properties as a list.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "sublist",
+          "default": "sublist",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "list_style": {
+          "title": "List Style",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ListItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FormFieldEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "list_style",
+        "items",
+        "quad"
+      ],
+      "title": "SublistLayout",
+      "type": "object"
+    },
     "Table": {
       "additionalProperties": false,
       "properties": {
@@ -2682,10 +2884,12 @@
             "heading": "#/$defs/HeadingLayout",
             "list": "#/$defs/ListLayout",
             "logo": "#/$defs/LogoLayout",
+            "page_number": "#/$defs/PageNumberLayout",
             "paragraph": "#/$defs/ParagraphLayout",
             "signature": "#/$defs/SignatureLayout",
             "stamp": "#/$defs/StampLayout",
             "subheading": "#/$defs/SubheadingLayout",
+            "sublist": "#/$defs/SublistLayout",
             "table": "#/$defs/TableLayout",
             "table_heading": "#/$defs/TableHeadingLayout",
             "title": "#/$defs/TitleLayout"
@@ -2712,6 +2916,9 @@
             "$ref": "#/$defs/FooterLayout"
           },
           {
+            "$ref": "#/$defs/PageNumberLayout"
+          },
+          {
             "$ref": "#/$defs/CaptionLayout"
           },
           {
@@ -2725,6 +2932,9 @@
           },
           {
             "$ref": "#/$defs/ListLayout"
+          },
+          {
+            "$ref": "#/$defs/SublistLayout"
           },
           {
             "$ref": "#/$defs/FormFieldLayout"

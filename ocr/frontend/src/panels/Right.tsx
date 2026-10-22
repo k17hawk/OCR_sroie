@@ -196,7 +196,7 @@ function Children({ el, doc }: { el: LayoutElement; doc: Doc }) {
     );
   }
 
-  if (el.type === "list") {
+  if (el.type === "list" || el.type === "sublist") {
     return (
       <ul>
         {el.items.map((item, i) => (

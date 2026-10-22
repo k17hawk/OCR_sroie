@@ -30,8 +30,8 @@ DEFAULT_FIELD_TYPES: list[str] = [
 DEFAULT_LAYOUT_TYPES: list[str] = [
     # the region types of the v2 schema (doc_v2.REGION_TYPES); older type
     # names are mapped on load by core/migrate.py
-    "title", "heading", "subheading", "paragraph", "list", "form_field",
-    "table", "table_heading", "header", "footer", "figure", "logo", "stamp",
+    "title", "heading", "subheading", "paragraph", "list", "sublist", "form_field",
+    "table", "table_heading", "header", "footer", "page_number", "figure", "logo", "stamp",
     "signature", "handwriting", "caption",
 ]
 
@@ -69,6 +69,10 @@ def _read_all() -> list[Project]:
         # a project saved before the type list changed may still list old
         # region types (text_line, list_item, …): offer only current ones
         kept = [t for t in pr.layout_types if t in REGION_TYPES]
+        if "list" in kept and "sublist" not in kept:
+            kept.insert(kept.index("list") + 1, "sublist")
+        if "page_number" not in kept:
+            kept.insert(kept.index("footer") + 1 if "footer" in kept else len(kept), "page_number")
         pr.layout_types = kept or list(DEFAULT_LAYOUT_TYPES)
     return projects
 

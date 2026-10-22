@@ -160,7 +160,7 @@ function checkboxText(options: any[]): string {
   return options.map((o) => `[${o.checked ? "x" : " "}] ${o.text}`).join(" ");
 }
 
-const FIELD_HOSTS = new Set(["form_field", "table", "list"]);
+const FIELD_HOSTS = new Set(["form_field", "table", "list", "sublist"]);
 
 /**
  * One field in the current shape: label null | {text, bbox?, quad?,
@@ -451,7 +451,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       el.subtype = el.subtype ?? "note";
       el.handwritten = true;
     }
-    if (el.type === "list") {
+    if (el.type === "list" || el.type === "sublist") {
       let items = Array.isArray(el.items) ? el.items : [];
       const parsed = !items.length && !!(el.text ?? "").trim();
       if (parsed) {
@@ -489,7 +489,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     const byId = new Map<number, any>(layout.map((e) => [e.id, e]));
     const owned = new Map<number, [number, number]>();
     for (const el of layout) {
-      if (el.type !== "list") continue;
+      if ((el.type !== "list" && el.type !== "sublist")) continue;
       el.items.forEach((it: any, i: number) => {
         if (!it.children) return;
         it.children = it.children.filter((c: number) => byId.has(c) && c !== el.id && !owned.has(c));
@@ -506,7 +506,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       const c = byId.get(id);
       return !c ? "" : c.type === "figure" ? "<figure/>" : (c.text ?? "");
     };
-    for (const el of layout) if (el.type === "list") el.text = listText(el.items, childText);
+    for (const el of layout) if (el.type === "list" || el.type === "sublist") el.text = listText(el.items, childText);
   }
 
   // 5. nesting that can't be resolved automatically
@@ -636,7 +636,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       continue;
     }
     // nothing usable: synthesize from the element's text
-    const text = el.type === "list"
+    const text = (el.type === "list" || el.type === "sublist")
       ? el.items.map((i: any) => (i.marker ? i.marker + " " : "") + i.text).join("\n")
       : isHeading ? stripHeadingPrefix(el.text ?? "") : (el.text ?? "");
     const parts = text.split("\n").map((s: string) => s.trim()).filter(Boolean);
@@ -703,6 +703,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       case "form_field": base.fields = el.fields; break;
       case "table": base.table_index = el.table_index; break;
       case "list":
+      case "sublist":
         base.list_style = el.list_style;
         base.items = el.items.map((it: any) => it.children
           ? { ...it, children: it.children.map((c: number) => idMap.get(c)).filter((c: any) => c != null) }
@@ -711,7 +712,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
       case "signature": base.signer = el.signer; break;
       case "stamp": base.stamp_text = cleanText(el.stamp_text); break;
     }
-    if ((el.type === "table" || el.type === "list") && Array.isArray(el.fields) && el.fields.length) {
+    if ((el.type === "table" || (el.type === "list" || el.type === "sublist") || el.type === "sublist") && Array.isArray(el.fields) && el.fields.length) {
       base.fields = el.fields;
     }
     // a label that is another region: that region's exported id
@@ -756,7 +757,7 @@ export function normalizeForExport(input: any): { doc: any; warnings: ExportWarn
     !!src.quality?.has_handwriting;
   q.raw_lengths = {
     paragraph_chars: outLayout.filter((e) => e.type === "paragraph").reduce((n, e) => n + (e.text?.length ?? 0), 0),
-    list_items: outLayout.filter((e) => e.type === "list").reduce((n, e) => n + e.items.length, 0),
+    list_items: outLayout.filter((e) => (e.type === "list" || e.type === "sublist")).reduce((n, e) => n + e.items.length, 0),
     form_fields: allFields.length,
     table_cells: outTables.reduce((n, t) => n + t.cells.length, 0),
   };

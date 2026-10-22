@@ -123,7 +123,8 @@ export interface TableLayout {
 }
 export interface ListLayout {
   id: number;
-  type: "list";
+  /** "sublist": a list nested under another list's item, same properties */
+  type: "list" | "sublist";
   bbox: BBox;
   reading_order: number | null;
   text: string;
@@ -140,10 +141,10 @@ export interface ParagraphLayout {
   text: string;
   quad: Quad;
 }
-/** title, subheading, table_heading, caption: text-only regions. */
+/** title, subheading, table_heading, caption, page_number: text-only regions. */
 export interface TextRegionLayout {
   id: number;
-  type: "title" | "subheading" | "table_heading" | "caption";
+  type: "title" | "subheading" | "table_heading" | "caption" | "page_number";
   bbox: BBox;
   reading_order: number | null;
   text: string;

@@ -31,6 +31,7 @@ export interface Doc {
     | TableHeadingLayout
     | TableFooterLayout
     | ListLayout
+    | SublistLayout
     | FormFieldLayout
     | FormLabelLayout
     | FormValueLayout
@@ -465,6 +466,37 @@ export interface ListItem {
   level: number;
   text: string;
   children?: number[] | null;
+}
+/**
+ * A list nested under another list's item: same properties as a list.
+ *
+ * This interface was referenced by `Doc`'s JSON-Schema
+ * via the `definition` "SublistLayout".
+ */
+export interface SublistLayout {
+  id: number;
+  type?: "sublist";
+  /**
+   * [x0, y0, x1, y1] integer pixels
+   *
+   * @minItems 4
+   * @maxItems 4
+   */
+  bbox: [number, number, number, number];
+  reading_order?: number | null;
+  text: string;
+  list_style: string;
+  items: ListItem[];
+  fields?: FormField[];
+  parent_id?: number | null;
+  parent_item?: number | null;
+  /**
+   * TL, TR, BR, BL
+   *
+   * @minItems 4
+   * @maxItems 4
+   */
+  quad: [[number, number], [number, number], [number, number], [number, number]];
 }
 /**
  * This interface was referenced by `Doc`'s JSON-Schema

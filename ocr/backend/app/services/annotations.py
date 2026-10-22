@@ -155,14 +155,14 @@ def _clean_layout_element(el: dict[str, Any]) -> dict[str, Any]:
         out["reading_order"] = _to_int(out.get("reading_order"), None)
     if t == "heading":
         out["level"] = min(6, max(1, _to_int(out.get("level"), 2) or 2))
-    if t == "list":
+    if t in ("list", "sublist"):
         out["items"] = [
             {**_keep(i, ListItem), "level": _to_int((i or {}).get("level"), 0) or 0}
             for i in out.get("items") or [] if isinstance(i, dict)
         ]
         for i in out["items"]:
             i.setdefault("marker", ""); i.setdefault("text", "")
-    if t == "form_field" or (t in ("table", "list") and isinstance(out.get("fields"), list)):
+    if t == "form_field" or (t in ("table", "list", "sublist") and isinstance(out.get("fields"), list)):
         out["fields"] = [_clean_form_field(f) for f in out.get("fields") or []]
     return out
 
@@ -255,7 +255,7 @@ def _list_style(items: list[dict[str, Any]]) -> str:
 
 def _fill_lists_from_children(layout: list[dict[str, Any]]) -> None:
     for el in layout:
-        if el.get("type") != "list" or el.get("items"):
+        if el.get("type") not in ("list", "sublist") or el.get("items"):
             continue
         if (el.get("text") or "").strip():
             continue  # typed text: finalize() turns it into items

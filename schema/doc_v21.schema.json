@@ -2789,6 +2789,116 @@
       "title": "SubheadingLayout",
       "type": "object"
     },
+    "SublistLayout": {
+      "additionalProperties": false,
+      "description": "A list nested under another list's item: same properties as a list.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "sublist",
+          "default": "sublist",
+          "title": "Type",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "[x0, y0, x1, y1] integer pixels",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Bbox",
+          "type": "array"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "list_style": {
+          "title": "List Style",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ListItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FormField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "parent_item": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Item"
+        },
+        "quad": {
+          "description": "TL, TR, BR, BL",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quad",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "bbox",
+        "text",
+        "list_style",
+        "items",
+        "quad"
+      ],
+      "title": "SublistLayout",
+      "type": "object"
+    },
     "Table": {
       "additionalProperties": false,
       "description": "``header_rows`` = number of leading rows whose cells are all <th>.",
@@ -3443,6 +3553,7 @@
             "signature_caption": "#/$defs/SignatureCaptionLayout",
             "stamp": "#/$defs/StampLayout",
             "subheading": "#/$defs/SubheadingLayout",
+            "sublist": "#/$defs/SublistLayout",
             "table": "#/$defs/TableLayout",
             "table_footer": "#/$defs/TableFooterLayout",
             "table_heading": "#/$defs/TableHeadingLayout",
@@ -3489,6 +3600,9 @@
           },
           {
             "$ref": "#/$defs/ListLayout"
+          },
+          {
+            "$ref": "#/$defs/SublistLayout"
           },
           {
             "$ref": "#/$defs/FormFieldLayout"

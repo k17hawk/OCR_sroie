@@ -315,6 +315,15 @@ class ListLayout(_LayoutBase):
     quad: Quad
 
 
+class SublistLayout(ListLayout):
+    """A list nested under another list's item: same properties as a list."""
+    type: Literal["sublist"] = "sublist"
+
+
+# region types that carry list items (list_style / items / text)
+LIST_TYPES: frozenset[str] = frozenset({"list", "sublist"})
+
+
 class ParagraphLayout(_LayoutBase):
     id: int
     type: Literal["paragraph"] = "paragraph"
@@ -339,6 +348,11 @@ class FooterLayout(_LayoutBase):
     parent_id: Optional[int] = None
     parent_item: Optional[int] = None
     quad: Quad
+
+
+class PageNumberLayout(_TextLayout):
+    """The printed page number (१, 2, "पृष्ठ ३", …)."""
+    type: Literal["page_number"] = "page_number"
 
 
 class LogoLayout(_LayoutBase):
@@ -386,12 +400,14 @@ LayoutElement = Annotated[
         SubheadingLayout,
         ParagraphLayout,
         FooterLayout,
+        PageNumberLayout,
         CaptionLayout,
         # blocks
         FigureLayout,
         TableLayout,
         TableHeadingLayout,
         ListLayout,
+        SublistLayout,
         # forms
         FormFieldLayout,
         # marks
@@ -627,5 +643,5 @@ __all__ = [
     "FooterLayout", "LogoLayout", "SignatureLayout", "StampLayout",
     "LayoutElement", "Block", "Line", "TableCell", "Table", "RulingLine",
     "CheckboxExtraRegion", "FingerprintExtraRegion", "ExtraRegion",
-    "RawLengths", "Quality", "Annotation", "Doc", "REGION_TYPES",
+    "RawLengths", "Quality", "Annotation", "Doc", "REGION_TYPES", "LIST_TYPES", "SublistLayout",
 ]

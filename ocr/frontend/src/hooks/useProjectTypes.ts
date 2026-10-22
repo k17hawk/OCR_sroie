@@ -29,8 +29,8 @@ export const FALLBACK_TYPES: ProjectTypes = {
   ],
   // the region types of the v2 schema (older names are mapped on load)
   layout_types: [
-    "title", "heading", "subheading", "paragraph", "list", "form_field",
-    "table", "table_heading", "header", "footer", "figure", "logo", "stamp",
+    "title", "heading", "subheading", "paragraph", "list", "sublist", "form_field",
+    "table", "table_heading", "header", "footer", "page_number", "figure", "logo", "stamp",
     "signature", "handwriting", "caption",
   ],
 };
@@ -74,7 +74,7 @@ export function prettyType(t: string): string {
 // Types that carry plain text and are drawn/edited like a paragraph.
 export const TEXT_LIKE_TYPES = new Set([
   "header", "title", "heading", "subheading", "paragraph",
-  "footer", "caption", "table_heading", "handwriting",
+  "footer", "page_number", "caption", "table_heading", "handwriting",
 ]);
 
 // ---------------------------------------------------------------------------

@@ -109,7 +109,8 @@ def test_removed_region_types_rejected(removed):
 
 @pytest.mark.parametrize("rtype", s.FIELD_REGION_TYPES)
 def test_fields_allowed_on_form_table_list(rtype):
-    model = {"form_field": s.FormFieldLayout, "table": s.TableLayout, "list": s.ListLayout}[rtype]
+    model = {"form_field": s.FormFieldLayout, "table": s.TableLayout, "list": s.ListLayout,
+             "sublist": s.SublistLayout}[rtype]
     assert "fields" in model.model_fields
 
 

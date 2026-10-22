@@ -294,7 +294,7 @@ function textForLayoutElement(
     const st = (el as any).stamp_text as string | undefined;
     return st && st.trim().length > 0 ? { text: st, italic: true } : null;
   }
-  if (el.type === "list") {
+  if (el.type === "list" || el.type === "sublist") {
     const items = (el as any).items as { marker: string; text: string }[] | undefined;
     if (!items || items.length === 0) return null;
     return { text: items.map((it) => `${it.marker} ${it.text}`).join("\n"), italic: false };

@@ -33,8 +33,8 @@ DEFAULT_FIELD_TYPES: list[str] = [
 DEFAULT_LAYOUT_TYPES: list[str] = [
     # the region types of the v2 schema (doc_v2.REGION_TYPES); older type
     # names are mapped on load by core/migrate.py
-    "title", "heading", "subheading", "paragraph", "list", "form_field",
-    "table", "table_heading", "header", "footer", "figure", "logo", "stamp",
+    "title", "heading", "subheading", "paragraph", "list", "sublist", "form_field",
+    "table", "table_heading", "header", "footer", "page_number", "figure", "logo", "stamp",
     "signature", "handwriting", "caption",
 ]
 
