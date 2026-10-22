@@ -459,8 +459,16 @@ def replace(
             "got": x["lost"], "region_id": x["region_id"], "before": x["before"], "after": x["after"],
         } for x in lost])
 
+    # A save never changes the workflow status: that only happens through
+    # POST /documents/{id}/status (status.py). Whatever status the editor
+    # sends is ignored, so a stale editor can't revert "submitted"/"approved"
+    # back to "in_progress". The one exception: the first save of a
+    # pre-annotated page means a person has started on it.
+    if row.status in (None, "", "generated", "pre_annotated"):
+        row.status = "in_progress"
+    finalized.annotation.status = row.status
+
     row.doc = finalized
-    row.status = finalized.annotation.status
     row.revision += 1
 
     doc_store.save(row)

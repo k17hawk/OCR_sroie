@@ -9,10 +9,11 @@ from app.storage import doc_store
 
 _ALLOWED: dict[str, set[str]] = {
     "generated":     {"pre_annotated"},
-    "pre_annotated": {"in_progress"},
+    # a pre-annotated page that needed no edits can be submitted directly
+    "pre_annotated": {"in_progress", "submitted"},
     "in_progress":   {"submitted"},
     "submitted":     {"approved", "rejected"},
-    "approved":      {"submitted"},
+    "approved":      {"submitted", "rejected"},
     "rejected":      {"in_progress", "submitted"},
 }
 

@@ -312,6 +312,33 @@ function ReadingOrderPanel({ doc }: { doc: Doc }) {
 // ---------------------------------------------------------------------------
 
 function PageMetaPanel({ doc }: { doc: Doc }) {
+  const [busy, setBusy] = useState(false);
+  const status = doc.annotation?.status ?? "in_progress";
+  const typeMissing = !doc.doc_type || doc.doc_type === "other";
+
+  const run = async (target: "submitted" | "approved" | "rejected") => {
+    let comment: string | undefined;
+    if (target === "rejected") {
+      const c = window.prompt("Reason for rejecting this page (optional):", "");
+      if (c === null) return; // cancelled
+      comment = c || undefined;
+    }
+    setBusy(true);
+    try {
+      const { changeStatus } = await import("../editor/status");
+      await changeStatus(target, comment);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canSubmit = !busy && !typeMissing &&
+    ["pre_annotated", "in_progress", "rejected", "approved"].includes(status);
+  const canReview = !busy && (status === "submitted" || status === "approved");
+
+  const btn = (enabled: boolean, on: string) =>
+    "w-full rounded px-2 py-1 text-[11px] font-medium " +
+    (enabled ? on : "bg-slate-800 text-slate-500 cursor-not-allowed");
 
   return (
     <div className="space-y-3 text-xs">
@@ -319,33 +346,46 @@ function PageMetaPanel({ doc }: { doc: Doc }) {
         <div>
           <div className="mb-1 text-slate-400">doc_type</div>
           <DocTypePicker />
-          {doc.doc_type === "other" && (
+          {typeMissing && (
             <div className="mt-1 text-[10px] text-rose-400">
               Must be set before submit.
             </div>
           )}
         </div>
 
+        <KV label="status" value={status} />
+
         <button
-          disabled={doc.doc_type === "other"}
-          onClick={async () => {
-            const { saveCurrent } = await import("../editor/save");
-            if (useStore.getState().dirty && !(await saveCurrent())) return;
-            await fetch(`/documents/${doc.document_id}/status`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ target: "submitted" }),
-            });
-          }}
-          className={
-            "w-full rounded px-2 py-1 text-[11px] font-medium " +
-            (doc.doc_type !== "other"
-              ? "bg-emerald-600 text-white hover:bg-emerald-500"
-              : "bg-slate-800 text-slate-500")
-          }
+          disabled={!canSubmit}
+          onClick={() => run("submitted")}
+          className={btn(canSubmit, "bg-emerald-600 text-white hover:bg-emerald-500")}
         >
-          Submit for review
+          {status === "approved" ? "Re-submit for review" : "Submit for review"}
         </button>
+      </Section>
+
+      <Section title="Review">
+        <div className="flex gap-2">
+          <button
+            disabled={!canReview || status === "approved"}
+            onClick={() => run("approved")}
+            className={btn(canReview && status !== "approved", "bg-emerald-700 text-white hover:bg-emerald-600")}
+          >
+            Approve
+          </button>
+          <button
+            disabled={!canReview}
+            onClick={() => run("rejected")}
+            className={btn(canReview, "bg-rose-700 text-white hover:bg-rose-600")}
+          >
+            Reject
+          </button>
+        </div>
+        {!canReview && (
+          <div className="mt-1 text-[10px] text-slate-500">
+            Submit the page first; then it can be approved or rejected.
+          </div>
+        )}
       </Section>
 
       <Section title="Language & quality">
