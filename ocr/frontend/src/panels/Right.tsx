@@ -197,6 +197,7 @@ function Children({ el, doc }: { el: LayoutElement; doc: Doc }) {
   }
 
   if (el.type === "list" || el.type === "sublist") {
+<<<<<<< ours
     return (
       <ul>
         {el.items.map((item, i) => (
@@ -209,6 +210,9 @@ function Children({ el, doc }: { el: LayoutElement; doc: Doc }) {
         ))}
       </ul>
     );
+=======
+    return <ListItemsTree el={el} doc={doc} depth={0} />;
+>>>>>>> theirs
   }
 
   if (el.type === "table") {
@@ -238,6 +242,74 @@ function Children({ el, doc }: { el: LayoutElement; doc: Doc }) {
   }
 
   return <ul>{lineNodes}</ul>;
+}
+
+/**
+ * The items of a list / sublist, each one clickable: it selects the item's
+ * line (so the canvas highlights it and Properties opens it), or the list
+ * itself when the item has no line yet. Boxes attached to an item (a
+ * sublist, a note, a figure) are shown under it and are clickable too; a
+ * nested list shows its own items.
+ */
+function ListItemsTree({ el, doc, depth }: { el: any; doc: Doc; depth: number }) {
+  const setSelection = useStore((s) => s.setSelection);
+  const selection = useStore((s) => s.selection);
+  if (depth > 6) return null; // guard against a list attached to itself
+  const items: any[] = Array.isArray(el.items) ? el.items : [];
+  return (
+    <ul>
+      {items.map((item, i) => {
+        const lineIndex = doc.lines.findIndex(
+          (ln: any) => ln.block_id === el.id && ln.item_index === i,
+        );
+        const isSelected = lineIndex >= 0 && selection?.kind === "line" && selection.index === lineIndex;
+        const kids = (item.children ?? [])
+          .map((cid: number) => doc.layout.find((e) => e.id === cid))
+          .filter(Boolean) as any[];
+        return (
+          <li key={`it-${i}`} className="ml-6" style={{ paddingLeft: (item.level || 0) * 12 }}>
+            <button
+              onClick={() =>
+                setSelection(lineIndex >= 0 ? { kind: "line", index: lineIndex } : { kind: "layout", id: el.id })
+              }
+              className={
+                "w-full truncate rounded px-2 py-0.5 text-left text-[11px] text-slate-400 hover:bg-slate-800 hover:text-slate-200 " +
+                (isSelected ? "bg-slate-800 text-slate-200" : "")
+              }
+              title={`${item.marker ?? ""} ${item.text ?? ""}`.trim()}
+            >
+              {item.marker} {item.text || "∅"}
+            </button>
+            {kids.length > 0 && (
+              <ul>
+                {kids.map((c) => {
+                  const sel = selection?.kind === "layout" && selection.id === c.id;
+                  return (
+                    <li key={`ch-${c.id}`} className="ml-6">
+                      <button
+                        onClick={() => setSelection({ kind: "layout", id: c.id })}
+                        className={
+                          "flex w-full items-center gap-2 rounded px-2 py-0.5 text-left text-[11px] hover:bg-slate-800 " +
+                          (sel ? "bg-slate-800" : "")
+                        }
+                      >
+                        <span className="inline-block h-2 w-2 rounded-sm" style={{ background: typeColor(c.type) }} />
+                        <span className="font-mono text-slate-400">{c.id}</span>
+                        <span className="text-slate-300">{prettyType(c.type)}</span>
+                      </button>
+                      {(c.type === "list" || c.type === "sublist") && (
+                        <ListItemsTree el={c} doc={doc} depth={depth + 1} />
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 // ---------------------------------------------------------------------------
