@@ -24,14 +24,13 @@ def serialize_list(
 ) -> str:
     """Each item on its own line, indented 2 spaces per level.
 
-    Bullet markers become ``-``; non-bullet markers (``१.``, ``क)``) are kept
-    verbatim. An item's ``children`` (a note, a figure, … inside the item)
+    Every marker (``•``, ``-``, ``१.``, ``क)``) is kept verbatim. An item's ``children`` (a note, a figure, … inside the item)
     follow it, one level deeper; ``child_text(id)`` gives each child's text.
     """
     out: list[str] = []
     for item in items:
         indent = "  " * item.level
-        marker = "-" if item.marker in _BULLET_MARKERS else item.marker
+        marker = item.marker  # bullets are kept as printed (•, -, *, …)
         first, *rest = item.text.split("\n")
         out.append(f"{indent}{marker} {first}")
         # an item printed on several lines: its further lines under it

@@ -821,8 +821,6 @@ def items_text(items):
     out = []
     for it in items:
         m = it.get("marker")
-        if m and parse_marker(m + " x") and parse_marker(m + " x")["kind"] == "bullet":
-            m = "-"
         out.append("  " * int(it.get("level") or 0) + (f"{m} " if m else "") + (it.get("text") or ""))
     return "\n".join(o.rstrip() for o in out if o.strip())
 

@@ -1036,7 +1036,7 @@ const LIST_MARKER_RE =
   /^(\s*)((?:[०-९]+|[0-9]+)[.)]|\(?[क-ह]\)|\([०-९0-9]+\)|[a-zA-Z][.)]|(?:[ivxlcdm]+|[IVXLCDM]+)[.)]|[-•*●▪◦–])\s+(.*)$/;
 
 /**
- * "१. a\n  - b" -> [{marker:"१.",level:0,text:"a"},{marker:"•",level:1,text:"b"}]
+ * "१. a\n  • b" -> [{marker:"१.",level:0,text:"a"},{marker:"•",level:1,text:"b"}] (markers kept as printed)
  *
  * `children`: boxes that already belong to items of this list, with their
  * text. A marker-less line equal to one of them is that child (it stays
@@ -1053,7 +1053,7 @@ export function listItemsFromText(
     const m = raw.match(LIST_MARKER_RE);
     const ci = m ? -1 : unused.findIndex((c) => c.text.trim() === raw.trim());
     if (m) {
-      const marker = m[2] === "-" || m[2] === "*" || m[2] === "●" ? "•" : m[2];
+      const marker = m[2]; // keep the printed bullet (•, -, *, …) as is
       items.push({ marker, level: Math.floor(m[1].replace(/\t/g, "  ").length / 2), text: m[3].trim() });
     } else if (ci >= 0 && items.length) {
       const last = items[items.length - 1];
@@ -1088,7 +1088,7 @@ export function listTextFromItems(items: ListItemData[], d?: Doc | null): string
   for (const it of items) {
     const indent = "  ".repeat(Math.max(0, it.level || 0));
     const [first, ...rest] = (it.text ?? "").split("\n");
-    out.push(indent + (it.marker ? (it.marker === "•" ? "-" : it.marker) + " " : "") + first);
+    out.push(indent + (it.marker ? it.marker + " " : "") + first);
     // the item's further printed lines, under it
     for (const part of rest) out.push(indent + "  " + part);
     for (const cid of it.children ?? []) {

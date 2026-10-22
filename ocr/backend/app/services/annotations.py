@@ -238,7 +238,7 @@ def _split_marker(text: str) -> tuple[str, str]:
     m = _MARKER_RE.match(text or "")
     if not m:
         return "", (text or "").strip()
-    marker = "•" if m.group(1) in ("-", "*", "●") else m.group(1)
+    marker = m.group(1)  # keep the printed bullet as is
     return marker, m.group(2).strip()
 
 
@@ -282,7 +282,7 @@ def _fill_lists_from_children(layout: list[dict[str, Any]]) -> None:
         if el.get("list_style") in (None, "", "bullet"):
             el["list_style"] = _list_style(items)
         el["text"] = "\n".join(
-            "  " * i["level"] + (("-" if i["marker"] == "•" else i["marker"]) + " " if i["marker"] else "") + i["text"]
+            "  " * i["level"] + (i["marker"] + " " if i["marker"] else "") + i["text"]
             for i in items
         )
         log.info("list #%s: %d item(s) filled from the box(es) inside it", el.get("id"), len(items))

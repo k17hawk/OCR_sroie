@@ -116,7 +116,7 @@ function parseListText(text: string): { marker: string; level: number; text: str
     if (!raw.trim()) continue;
     const m = raw.match(MARKER_RE);
     if (m) {
-      const marker = m[2] === "-" || m[2] === "*" || m[2] === "●" ? "•" : m[2];
+      const marker = m[2]; // keep the printed bullet (•, -, *, …) as is
       items.push({ marker, level: Math.floor(m[1].replace(/\t/g, "  ").length / 2), text: m[3].trim() });
     } else if (items.length) {
       items[items.length - 1].text += " " + raw.trim(); // wrapped continuation line
@@ -142,7 +142,7 @@ function listText(
   for (const it of items) {
     const indent = "  ".repeat(it.level);
     const [first, ...rest] = (it.text ?? "").split("\n");
-    out.push(indent + (it.marker === "•" ? "-" : it.marker) + (it.marker ? " " : "") + first);
+    out.push(indent + it.marker + (it.marker ? " " : "") + first);
     for (const part of rest) out.push(indent + "  " + part);
     for (const cid of it.children ?? []) {
       const t = childText(cid);
