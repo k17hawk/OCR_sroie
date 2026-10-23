@@ -368,6 +368,41 @@ def _match(gray, el, box, texts, old, start, role=None, what="") -> tuple[Option
             for i, (t, b) in enumerate(zip(texts, found))], None
 
 
+def _row_owners(rec: dict[str, Any], el: dict[str, Any]) -> list[Optional[tuple[int, int]]]:
+    """For each printed row of a list's text: ``(item_index, level)`` of the
+    item it belongs to, or None for a row that is an attached box's text
+    (a note, a figure under an item: that box has its own lines)."""
+    by_id = {e.get("id"): e for e in rec.get("layout") or [] if isinstance(e, dict)}
+    owners: list[Optional[tuple[int, int]]] = []
+    for i, it in enumerate(el.get("items") or []):
+        if not isinstance(it, dict):
+            continue
+        level = int(it.get("level") or 0)
+        rows = [r for r in (it.get("text") or "").split("\n") if r.strip()] or [""]
+        owners += [(i, level)] * len(rows)
+        for cid in it.get("children") or []:
+            c = by_id.get(cid) or {}
+            ctext = "<figure/>" if c.get("type") == "figure" else (c.get("text") or "")
+            owners += [None] * len([r for r in ctext.split("\n") if r.strip()])
+    return owners
+
+
+def _link_rows_to_items(rec: dict[str, Any], el: dict[str, Any], new: list[dict[str, Any]]) -> None:
+    """Give each measured row of a list the item it prints (``item_index``,
+    ``list_level``), so every bullet and each of its wrapped rows is its own
+    line tied to its item. Left alone when the rows don't line up with the
+    items (text typed without items yet: the editor links them on load)."""
+    owners = _row_owners(rec, el)
+    if len(owners) != len(new):
+        return
+    for ln, own in zip(new, owners):
+        if own is None:
+            ln.pop("item_index", None)
+            ln.pop("list_level", None)
+        else:
+            ln["item_index"], ln["list_level"] = own
+
+
 def detect_page_lines(
     gray: np.ndarray, rec: dict[str, Any], region_ids: Optional[set[int]] = None,
 ) -> tuple[dict[str, Any], list[str]]:
@@ -397,6 +432,8 @@ def detect_page_lines(
             warnings.append(w)
         if new is None:
             continue
+        if el.get("type") in ("list", "sublist"):
+            _link_rows_to_items(rec, el, new)
 
         keep = [ln for ln in rec.get("lines") or []
                 if not (isinstance(ln, dict) and ln.get("block_id") == rid and not _is_table_line(ln))]
