@@ -187,12 +187,20 @@ export const detectLines = (documentId: string, args: { doc: Doc; element_id?: n
 export const snapTable = (documentId: string, args: { doc: Doc; element_id: number; html?: string }) =>
   pageFix(documentId, "snap-table", args);
 
-/** Tighten a drawn / resized child box to the text ink inside it (kept inside `clip_to`). */
+/**
+ * Tighten a drawn / resized child box to the text ink inside it (kept inside
+ * `clip_to`). Tilted text comes back as a tilted `quad` with its outer `bbox`.
+ */
 export async function snapBox(
   documentId: string,
   bbox: [number, number, number, number],
   clip_to?: [number, number, number, number] | null,
-): Promise<{ bbox: [number, number, number, number]; changed: boolean }> {
+): Promise<{
+  bbox: [number, number, number, number];
+  changed: boolean;
+  /** set when the text inside is tilted: a tight rotated box (TL, TR, BR, BL) */
+  quad?: [number, number][] | null;
+}> {
   const r = await fetch(`/documents/${documentId}/snap-box`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

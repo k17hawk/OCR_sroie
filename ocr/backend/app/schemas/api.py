@@ -266,3 +266,5 @@ class SuggestTableResponse(BaseModel):
 class SnapBoxResponse(BaseModel):
     bbox: list[int]
     changed: bool
+    # set when the text inside is tilted: a tight rotated box (TL, TR, BR, BL)
+    quad: list[list[float]] | None = None

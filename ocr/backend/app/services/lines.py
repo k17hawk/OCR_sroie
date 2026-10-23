@@ -16,6 +16,7 @@ differ it warns and leaves the region's lines alone instead of guessing.
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Iterable, Optional
 
@@ -194,6 +195,89 @@ def snap_box_to_ink(gray: np.ndarray, bbox: Iterable[float], pad: int = 6,
     if clip_to is not None:
         box = _clip(box, clip_to)
     return box if box[2] > box[0] and box[3] > box[1] else bbox
+
+
+# below this the text counts as straight and the snapped box stays a rectangle
+MIN_TILT_DEG = 0.5
+MAX_TILT_DEG = 20.0
+
+
+def ink_angle(xs: np.ndarray, ys: np.ndarray, max_deg: float = MAX_TILT_DEG) -> float:
+    """Tilt of the text line(s) made of these ink pixels, in degrees.
+
+    Image coordinates (y down): a line rising to the right gives a negative
+    angle. Projection profile: the angle at which the ink, projected across
+    the line, piles up into the sharpest rows (largest sum of squared row
+    counts). Coarse 0.5 degree search, then 0.05 degree around the best.
+    """
+    if xs.size < 20:
+        return 0.0
+    if xs.size > 20000:  # plenty to measure an angle; keeps snap-on-mouse-up quick
+        step = int(math.ceil(xs.size / 20000))
+        xs, ys = xs[::step], ys[::step]
+    x = xs.astype(np.float64) - xs.mean()
+    y = ys.astype(np.float64) - ys.mean()
+
+    def score(deg: float) -> float:
+        t = math.radians(deg)
+        v = -x * math.sin(t) + y * math.cos(t)
+        h = np.bincount(np.round(v - v.min()).astype(np.int64))
+        return float(np.dot(h, h))
+
+    best = max(np.arange(-max_deg, max_deg + 1e-9, 0.5), key=score)
+    best = max(np.arange(best - 0.5, best + 0.5 + 1e-9, 0.05), key=score)
+    return float(best)
+
+
+def snap_box_to_ink_tilted(gray: np.ndarray, bbox: Iterable[float], pad: int = 6,
+                           clip_to: Optional[Iterable[float]] = None,
+                           ) -> tuple[list[int], Optional[list[list[float]]]]:
+    """Like ``snap_box_to_ink``, but follows tilted text.
+
+    Returns ``(bbox, quad)``. When the ink inside the drawn box is a line
+    tilted by at least ``MIN_TILT_DEG``, ``quad`` is a tight rotated
+    rectangle around it (TL, TR, BR, BL, padded by ``pad`` along its own
+    axes) and ``bbox`` its outer bounds. Otherwise ``quad`` is None and
+    ``bbox`` is exactly what ``snap_box_to_ink`` returns.
+    """
+    straight = snap_box_to_ink(gray, bbox, pad=pad, clip_to=clip_to)
+    drawn = [int(round(v)) for v in bbox]
+    c = _crop_box(gray, drawn)
+    if c is None:
+        return straight, None
+    x0, y0, x1, y1 = c
+    ys, xs = np.nonzero(ink_mask(gray[y0:y1, x0:x1]))
+    if xs.size < 20:
+        return straight, None
+    deg = ink_angle(xs, ys)
+    if abs(deg) < MIN_TILT_DEG:
+        return straight, None
+
+    t = math.radians(deg)
+    cos, sin = math.cos(t), math.sin(t)
+    px, py = xs.astype(np.float64) + x0, ys.astype(np.float64) + y0
+    u = px * cos + py * sin          # along the line
+    v = -px * sin + py * cos         # across it
+    umin, umax = u.min() - pad, u.max() + 1 + pad
+    vmin, vmax = v.min() - pad, v.max() + 1 + pad
+    if (umax - umin) < 1.5 * (vmax - vmin):
+        return straight, None        # a word or two: too short to trust the angle
+
+    H, W = gray.shape[:2]
+    lo = [0.0, 0.0, float(W), float(H)]
+    cl = [float(v) for v in clip_to] if clip_to is not None else lo
+    lim = [max(lo[0], cl[0]), max(lo[1], cl[1]), min(lo[2], cl[2]), min(lo[3], cl[3])]
+    quad: list[list[float]] = []
+    for uu, vv in ((umin, vmin), (umax, vmin), (umax, vmax), (umin, vmax)):  # TL, TR, BR, BL
+        qx = min(max(uu * cos - vv * sin, lim[0]), lim[2])
+        qy = min(max(uu * sin + vv * cos, lim[1]), lim[3])
+        quad.append([round(qx, 1), round(qy, 1)])
+    qxs, qys = [p[0] for p in quad], [p[1] for p in quad]
+    box = [int(math.floor(min(qxs))), int(math.floor(min(qys))),
+           int(math.ceil(max(qxs))), int(math.ceil(max(qys)))]
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return straight, None
+    return box, quad
 
 
 # ---------------------------------------------------------------------------

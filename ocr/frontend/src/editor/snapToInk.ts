@@ -16,8 +16,10 @@ const same = (a: BBox, b: BBox) => a.every((v, i) => Math.round(v) === Math.roun
 /**
  * After a child box was drawn or resized (already committed as drawn), ask
  * the server to tighten it to the text ink inside it and apply that as one
- * more edit. Skipped when Alt is held, for non-rectangular quads, and when
- * the box was changed again before the answer came back.
+ * more edit. Tilted text comes back as a tight tilted quad, so a loose
+ * straight box drawn around a slanted line becomes a slanted box. Skipped
+ * when Alt is held, for quads that are already tilted (adjusted by hand),
+ * and when the box was changed again before the answer came back.
  */
 export async function snapChildToInk(ref: ChildRef, drawn: BBox, alt: boolean): Promise<void> {
   if (alt) return;
@@ -33,7 +35,8 @@ export async function snapChildToInk(ref: ChildRef, drawn: BBox, alt: boolean): 
       const o = ref.get(d);
       if (!o || !same(o.bbox, drawn)) return; // moved again meanwhile: keep the newer box
       o.bbox = r.bbox;
-      o.quad = quadFromBBox(r.bbox);
+      // tilted text: a tight rotated box; straight text: the rectangle
+      o.quad = r.quad && r.quad.length === 4 ? (r.quad as unknown as Quad) : quadFromBBox(r.bbox);
     });
   } catch {
     // snapping is a convenience: the box stays as drawn

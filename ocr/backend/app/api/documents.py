@@ -32,7 +32,8 @@ from app.schemas.api import (
 from app.schemas.doc_v2 import Doc
 from app.services import annotations as ann_service
 from app.services import documents as doc_service
-from app.services.lines import TEXT_TYPES, detect_page_lines, snap_box_to_ink
+from app.services.lines import TEXT_TYPES, detect_page_lines, snap_box_to_ink, snap_box_to_ink_tilted
+from app.services.quad_crop import crop_quad
 from app.services.table_snap import snap_tables
 from app.services.table_suggest import suggest_table
 from app.services import projects as project_service
@@ -162,12 +163,11 @@ def ocr_region(document_id: str, body: OcrRegionRequest) -> OcrRegionResponse:
     img = PILImage.open(BytesIO(image_bytes))
     img.load()
 
-    xs = [p[0] for p in body.quad]
-    ys = [p[1] for p in body.quad]
-    x0, y0, x1, y1 = max(0, int(min(xs))), max(0, int(min(ys))), int(max(xs)), int(max(ys))
-    if x1 <= x0 or y1 <= y0:
-        raise HTTPException(422, "empty quad")
-    crop = img.crop((x0, y0, x1, y1))
+    # a tilted quad is straightened, not cut out by its outer box
+    try:
+        crop = crop_quad(img, body.quad)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
     try:
         adapters = registry.load({"family": body.family, "device": body.device})
@@ -299,5 +299,6 @@ def suggest_table_endpoint(document_id: str, body: SuggestTableRequest) -> Sugge
 def snap_box_endpoint(document_id: str, body: SnapBoxRequest) -> SnapBoxResponse:
     """Tighten a drawn / resized child box to the text ink inside it."""
     row = _load(document_id)
-    box = snap_box_to_ink(_gray(row), body.bbox, clip_to=body.clip_to)
-    return SnapBoxResponse(bbox=box, changed=box != [int(round(v)) for v in body.bbox])
+    box, quad = snap_box_to_ink_tilted(_gray(row), body.bbox, clip_to=body.clip_to)
+    return SnapBoxResponse(bbox=box, quad=quad,
+                           changed=quad is not None or box != [int(round(v)) for v in body.bbox])
